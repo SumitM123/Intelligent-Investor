@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+sqlalchemy
+asyncpg  # Or psycopg2-binary if you're using a synchronous PostgreSQL driver
+sqlmodel  # Optional: include if you are using SQLModel ORM
