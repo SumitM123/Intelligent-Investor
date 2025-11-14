@@ -1,0 +1,41 @@
+Development: 
+    # Start development
+    docker-compose -f docker-compose.dev.yml up -d
+
+    # View logs
+    docker-compose -f docker-compose.dev.yml logs -f
+
+    # Stop development
+    docker-compose -f docker-compose.dev.yml down
+
+    # Rebuild after dependency changes
+    docker-compose -f docker-compose.dev.yml up --build -d
+
+    ✅ Frontend: http://localhost:3000 (Hot reload with Turbopack)
+    ✅ Backend API: http://localhost:8000 (Hot reload with Uvicorn)
+    ✅ API Docs: http://localhost:8000/docs (Swagger UI)
+    ✅ Database: PostgreSQL on port 5432
+    ✅ File Changes: Instantly reflected without rebuild
+
+Deployment:
+    For all at once: 
+    docker-compose up --build
+
+
+    # Terminal 1 - Backend
+    cd backend
+    .\venv\Scripts\Activate.ps1
+    uvicorn main:app --reload --port 8000
+
+    # Terminal 2 - Frontend
+    cd frontend  
+    npm run dev
+
+    # Terminal 3 - Database (if needed)
+    docker run --name postgres-db -e POSTGRES_USER=productivity -e POSTGRES_PASSWORD=Jxj}8}wn00 -e POSTGRES_DB=productivity -p 5432:5432 -d postgres:13-alpine
+
+    ✅ Frontend: http://localhost:3000 (Optimized build)
+    ✅ Backend API: http://localhost:8000 (No reload, faster)
+    ✅ Database: PostgreSQL on port 5432
+    ❌ Hot Reload: Disabled for performance
+    ✅ Performance: Optimized for production
