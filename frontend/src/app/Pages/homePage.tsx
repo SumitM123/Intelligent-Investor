@@ -5,7 +5,7 @@ function HomePage() {
     return (
         <>
             <h1>
-                Welcome to Productivity-Assisstant
+                Intelligent Analyzer
             </h1>
             <button>
                 Sign-in to continue
