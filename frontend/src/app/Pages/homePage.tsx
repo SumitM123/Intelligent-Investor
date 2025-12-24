@@ -5,7 +5,7 @@ function HomePage() {
     return (
         <>
             <h1>
-                Intelligent Analyzer
+                Intelligent Analyzer checkingasdf asdf
             </h1>
             <button>
                 Sign-in to continue
