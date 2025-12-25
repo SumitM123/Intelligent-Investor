@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import create_engine, text
 import psycopg2
@@ -47,6 +48,7 @@ async def get_tasks():
 
 class User(BaseModel):
     google_id: str
+
 @app.post("/api/createUser")
 def create_user(user: User):
     google_id = user.google_id
@@ -54,6 +56,7 @@ def create_user(user: User):
         command = text("INSERT INTO users_id VALUES(:google_id)", {"google_id": google_id})
         session.execute(command)
         session.commit()
+    return JSONResponse(content="Successful request", status_code=200)
 
 if __name__ == "__main__":
     import uvicorn
