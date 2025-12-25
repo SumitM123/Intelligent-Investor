@@ -17,9 +17,6 @@ def get_stocks(user_id: str = None):
             The stocks will be of type 'jsonb' datatype
         Stocks table: Each row consists of the stock name, the date of bought, how much bought, total amount bount, the price bought at, total dividends earned
 
-        
-
-
     '''
 
     
