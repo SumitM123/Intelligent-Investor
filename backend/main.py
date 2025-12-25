@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from sqlalchemy import create_engine, text
 import psycopg2
 import os
-from .database import SessionLocal
+from database import SessionLocal
 
 app = FastAPI(title="Productivity Assistant API", version="1.0.0")
 
@@ -51,7 +51,10 @@ class User(BaseModel):
 def create_user(user: User):
     google_id = user.google_id
     with SessionLocal() as session:
-        command = text()
+        command = text("INSERT INTO users_id VALUES(:google_id)", {"google_id": google_id})
+        session.execute(command)
+        session.commit()
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
