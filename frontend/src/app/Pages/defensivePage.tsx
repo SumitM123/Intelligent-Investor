@@ -28,7 +28,9 @@ function DefensivePage () {
                 ID: userContext.userID
             }
         })
+        const bondsArr = axios.get('/api/stocks/getBonds')
     }, []);
+
     return (
         <h1>
             Defensive Page

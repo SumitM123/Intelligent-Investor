@@ -34,7 +34,7 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "database": "connected"}
+    return {"status": "healthy", "dffatabase": "connected"}
 
 @app.get("/api/tasks")
 async def get_tasks():
