@@ -9,7 +9,7 @@ router = APIRouter(prefix="/stocks")
 class User(BaseModel):
     google_id: str = None
 @router.get('getStocks')
-def get_stocks(user: User = None, ):
+def get_stocks(user: User = None, response: Response = None) -> Any:
     if user.google_id == None:
         return {"Error": "There's no user ID that's bounded to the request"}
     '''
@@ -21,11 +21,13 @@ def get_stocks(user: User = None, ):
     '''
     user_id = get_user_id()
     if user_id == None:
-        return JSONResponse()
-    with SessionLocal() as session:
-        result = session.execute(text("SELECT user_id FROM users_id WHERE google_id = :google_id"), 
-                        {"google_id": stock.google_id})
-        user_id = result.google_id
+        response.status_code = status.HTTP_400_BAD_REQUEST
+        return JSONResponse(content={"Error": "Not a valid google_id was provided"})
+    
+    # with SessionLocal() as session:
+    #     result = session.execute(text("SELECT user_id FROM users_id WHERE google_id = :google_id"), 
+    #                     {"google_id": stock.google_id})
+    #     user_id = result.google_id
 
         
 
