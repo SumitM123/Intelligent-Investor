@@ -8,7 +8,7 @@ from fastapi import Body
 from sqlalchemy import text
 
 
-router = APIRouter(prefix="/users")
+router = APIRouter(prefix="/api/users")
 
 @router.get("/getUserID")
 def get_user_id(google_id: str):

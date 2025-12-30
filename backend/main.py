@@ -7,6 +7,8 @@ import psycopg2
 import os
 from database import SessionLocal
 from routes.user import router as router_user 
+from routes.stocks import router as router_stocks
+
 app = FastAPI(title="Productivity Assistant API", version="1.0.0")
 
 # Add CORS middleware to allow frontend to communicate with backend
