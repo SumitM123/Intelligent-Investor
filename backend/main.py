@@ -6,7 +6,7 @@ from sqlalchemy import create_engine, text
 import psycopg2
 import os
 from database import SessionLocal
-
+from routes.user import router as router_user 
 app = FastAPI(title="Productivity Assistant API", version="1.0.0")
 
 # Add CORS middleware to allow frontend to communicate with backend
@@ -17,7 +17,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
+app.include_router(router_user)
 # DATABASE_URL = os.getenv("DATABASE_URL")
 # POSTGRE_USER = os.getenv("POSTGRE_USER")
 # POSTGRE_PASSWORD = os.getenv("POSTGRE_PASSWORD")
@@ -46,17 +46,17 @@ async def get_tasks():
         ]
     }
 
-class User(BaseModel):
-    google_id: str
+# class User(BaseModel):
+#     google_id: str
 
-@app.post("/api/createUser")
-def create_user(user: User):
-    google_id = user.google_id
-    with SessionLocal() as session:
-        command = text("INSERT INTO users_id VALUES(:google_id)", {"google_id": google_id})
-        session.execute(command)
-        session.commit()
-    return JSONResponse(content="Successful request", status_code=200)
+# @app.post("/api/createUser")
+# def create_user(user: User):
+#     google_id = user.google_id
+#     with SessionLocal() as session:
+#         command = text("INSERT INTO users_id VALUES(:google_id)", {"google_id": google_id})
+#         session.execute(command)
+#         session.commit()
+#     return JSONResponse(content="Successful request", status_code=200)
 
 if __name__ == "__main__":
     import uvicorn
