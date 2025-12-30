@@ -5,7 +5,7 @@ from fastapi import Response, status
 import requests
 from database import SessionLocal
 from frequenty_used_methods import get_user_id
-router = APIRouter(prefix="/stocks")
+router = APIRouter(prefix="/api/stocks")
 class User(BaseModel):
     google_id: str = None
 @router.get('getStocks')
