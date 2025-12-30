@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 from fastapi import APIRouter
 from fastapi import HTTPException
 from fastapi import Body
-
+from sqlalchemy import text
 
 
 router = APIRouter(prefix="/users")

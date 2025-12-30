@@ -1,7 +1,7 @@
 import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from fastapi import BaseModel
+from pydantic import BaseModel
 DATABASE_URL = os.getenv("DATABASE_URL")
 POSTGRE_USER = os.getenv("POSTGRE_USER")
 POSTGRE_PASSWORD = os.getenv("POSTGRE_PASSWORD")
