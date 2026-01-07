@@ -1,3 +1,5 @@
+"use client"
+
 import { useState, useContext, createContext, Dispatch, SetStateAction, ReactNode } from 'react';
 interface UserContextValue {
     userID: string;
