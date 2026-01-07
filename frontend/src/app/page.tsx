@@ -12,7 +12,7 @@
 //   );
 // }
 import React from "react";
- 
+import Link from 'next/link';
 export default function HomePage() {
     
     return (
@@ -20,9 +20,7 @@ export default function HomePage() {
             <h1>
                 Intelligent Investor Analyzer
             </h1>
-            <button>
-                Sign-in to continue
-            </button>
+            <Link href={'/pages/signIn'}> Sign In </Link>
         </>
     );
 }
