@@ -1,8 +1,18 @@
 import Image from "next/image";
 import HomePage from "./Pages/homePage"
+import SignInPage from "./Pages/signinPage";
+import DefensivePage from "./Pages/defensivePage";
+// import {Browsder}
+import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 export default function Home() {
   return (
-    <HomePage/>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Home/>}/>
+        <Route path="/signIn" element={<SignInPage/>}/>
+        <Route path="/defensivePage" element={<DefensivePage/>}/>
+      </Routes>
+    </BrowserRouter>
     
 
     // <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
