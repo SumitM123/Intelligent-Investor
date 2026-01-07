@@ -2,7 +2,6 @@ from fastapi import APIRouter
 from fastapi import Request
 from pydantic import BaseModel
 from fastapi import Response, status
-import requests
 from database import SessionLocal
 from frequenty_used_methods import get_user_id
 router = APIRouter(prefix="/api/stocks")

@@ -9,7 +9,7 @@ from database import SessionLocal
 from routes.user import router as router_user 
 from routes.stocks import router as router_stocks
 
-app = FastAPI(title="Productivity Assistant API", version="1.0.0")
+app = FastAPI(title="Intelligent Investor", version="1.0.0", )
 
 # Add CORS middleware to allow frontend to communicate with backend
 app.add_middleware(
@@ -20,6 +20,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(router_user)
+app.include_router(router_stocks)
 # DATABASE_URL = os.getenv("DATABASE_URL")
 # POSTGRE_USER = os.getenv("POSTGRE_USER")
 # POSTGRE_PASSWORD = os.getenv("POSTGRE_PASSWORD")
