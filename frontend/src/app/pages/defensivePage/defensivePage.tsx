@@ -2,11 +2,11 @@
 import React, { useEffect } from "react";
 import {useState} from 'react';
 import axios from 'axios';
-import {UserContext, useUserContext} from '../../Contexts/UserContext'
+// import {UserContext, useUserContext} from '../../Contexts/UserContext'
 function DefensivePage () {
     const [stocks, setStocks] = useState(null);
     const userContext = useUserContext();
-
+    
     /* 
         Diversifying Porfolio: Each stock is within on industry
             1) Information Technology

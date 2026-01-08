@@ -11,7 +11,7 @@ from sqlalchemy import text
 router = APIRouter(prefix="/api/users")
 
 @router.get("/getUserID")
-def get_user_id(google_id: str):
+def get_user_id(google_id: str, response: Response):
     user_id = None
     with SessionLocal() as session:
         try:
@@ -25,10 +25,12 @@ def get_user_id(google_id: str):
         except:
             session.rollback()
             user_id = None
+    
     if user_id == None:
         raise HTTPException(status_code=400, detail="Invalid request. User doesn't exist")
     else:
-        return JSONResponse(content={"Response status": "Sucess", "User ID": user_id})
+        response.set_cookie(key="user_id", value=str(user_id), max_age=300000, path="/api", httponly=True)
+        return {"Message": "Success"}
 
 class User(BaseModel):
     google_id: str 
