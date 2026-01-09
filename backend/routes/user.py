@@ -1,15 +1,27 @@
 from pydantic import BaseModel
 from database import SessionLocal
-from fastapi import FastAPI, Response, status
+from fastapi import FastAPI, Response, status, File, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter
 from fastapi import HTTPException
 from fastapi import Body
 from sqlalchemy import text
 
+'''
+    - Created a new table that stores user's personal information
+    - addUserID route:
+        the client will send a formdata. This way, you can retrive the image of the user. The image of the user will then be uploaded
+        to the S3 bucket, storing the key in the specific attribute
+    - getUserID:
+        - you have to get the presignedURl of the object that's stored in the S3 bucket for the respective UserName Picture key, then return that to the Server Component. The Server component
+        will then pass the presignedURL to the Client Component, in which the Client Component will display it if signed in. If not signed in, then will have the text of "Sign In"
+    
+    In the frontend, NavBar will be a component in the layout of the home page
+'''
 
 router = APIRouter(prefix="/api/users")
 
+# set's a cookie with the unique_ID that's stored inside the database. This way, each request doesn't have to be signed everytime
 @router.get("/getUserID")
 def get_user_id(google_id: str, response: Response):
     user_id = None
@@ -31,6 +43,7 @@ def get_user_id(google_id: str, response: Response):
     else:
         response.set_cookie(key="user_id", value=str(user_id), max_age=300000, path="/api", httponly=True)
         return {"Message": "Success"}
+
 
 class User(BaseModel):
     google_id: str 
@@ -57,6 +70,9 @@ def add_user_id(user_class: User):
         raise HTTPException(status_code=400, detail="Unable to add user")
     else:
         return JSONResponse(content="Successfull request. Added the user to database", status_code=200)
+
+    # add the necessary data to the User_Info table here
+    
             
 
 # Fix this code to delete the userID, and all the elements rows that are correlated with this user_id for other tables
