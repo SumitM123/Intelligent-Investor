@@ -2,3 +2,4 @@ docker-compose.yml
 docker-compose.dev.yml
 projectRunning.txt
 .env
+toDo.txt
