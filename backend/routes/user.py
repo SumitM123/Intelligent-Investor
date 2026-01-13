@@ -8,6 +8,7 @@ from fastapi import Body
 from sqlalchemy import text
 from typing import Annotated
 import nanoid
+import boto3
 '''
     - Created a new table that stores user's personal information
     - addUserID route:
@@ -106,7 +107,10 @@ def add_user_id(user_profile_pic: Annotated[bytes, File()],
     '''
         Add the profile picture of the user to S3 bucket with the profile_picture_key as the key to the object that's going to be stored in S3 bucket
     '''
-
+    # FIRST ASSUME THE ROLE, AND THEN UPLOAD TO THE BUCKET
+    s3_client = boto3.client('s3')
+    # try:
+    #     response = s3_client.upload_file(str(user-name + "profile_picture"), )
         
     # else:
     #     return JSONResponse(content="Successfull request. Added the user to database", status_code=200)
