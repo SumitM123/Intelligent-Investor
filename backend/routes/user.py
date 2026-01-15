@@ -108,7 +108,17 @@ def add_user_id(user_profile_pic: Annotated[bytes, File()],
         Add the profile picture of the user to S3 bucket with the profile_picture_key as the key to the object that's going to be stored in S3 bucket
     '''
     # FIRST ASSUME THE ROLE, AND THEN UPLOAD TO THE BUCKET
-    s3_client = boto3.client('s3')
+
+    sts = boto3.client("sts")
+    role = sts.assume_role(RoleArn="arn:aws:iam::782634014252:role/S3_Full_Access")
+    creds = role["Credentials"]
+    s3 = boto3.client(
+        "s3",
+        aws_access_key_id=creds["AccessKeyId"],
+        aws_secret_access_key=creds["SecretAccessKey"],
+        aws_session_token=creds["SessionToken"],
+    )
+    
     # try:
     #     response = s3_client.upload_file(str(user-name + "profile_picture"), )
         
