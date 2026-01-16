@@ -25,7 +25,17 @@ export default function RootLayout({
   return (
     <html lang="en">
       <div>
-        
+        {/* Inside this Div will be the navbar.
+        Inside the navbar, there will be two buttons: Intelligent Investor Analyzer, Sign In
+        Intelligent Investor:
+          When this is clicked, it'll go to the home page
+        Sign In:
+          If user isn't signed in, then it'll go to Sign-In Page
+          If user is signed in, then this is clicked, a lil drop down will appear saying sign out. If the user
+          presses that, then it'll sign out, and the content will change to sign-in. If user presses the profile
+          button again, then it will undo the drop down
+            If signed in, displays the user profile picture, and name as well right under it */}
+          
       </div>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
