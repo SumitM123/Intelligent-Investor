@@ -58,8 +58,8 @@ class User(BaseModel):
     If there is a new user, it'll add the user to the users_id table, as well as the user_info table
 '''
 @router.post('/addUser')
-def add_user_id(user_profile_pic: Annotated[bytes, File()],
-                user_profile_pic_meta: Annotated[UploadFile, File()],
+def add_user_id( # user_profile_pic: Annotated[bytes, File()], <- Don't need this because we need the name of the file
+                user_profile_pic: UploadFile,
                 user_email: Annotated[str, Form()],
                 user_name: Annotated[str, Form()],
                 google_id: Annotated[str, Form()], 
@@ -107,25 +107,30 @@ def add_user_id(user_profile_pic: Annotated[bytes, File()],
     '''
         Add the profile picture of the user to S3 bucket with the profile_picture_key as the key to the object that's going to be stored in S3 bucket
     '''
+    if inserted == False:
+        # return JSONResponse(content="Failed to add User", status_code=400)
+        raise HTTPException(status_code=400, detail="Unable to add user to database")
     # FIRST ASSUME THE ROLE, AND THEN UPLOAD TO THE BUCKET
-
     sts = boto3.client("sts")
-    role = sts.assume_role(RoleArn="arn:aws:iam::782634014252:role/S3_Full_Access")
-    creds = role["Credentials"]
-    s3 = boto3.client(
+    role = sts.assume_role(RoleArn="arn:aws:iam::782634014252:role/S3_Full_Access", RoleSessionName="S3 Full Access Role")
+    temp_credentials = role["Credentials"]
+
+    s3_resource = boto3.resource(
         "s3",
-        aws_access_key_id=creds["AccessKeyId"],
-        aws_secret_access_key=creds["SecretAccessKey"],
-        aws_session_token=creds["SessionToken"],
+        aws_access_key_id=temp_credentials["AccessKeyId"],
+        aws_secret_access_key=temp_credentials["SecretAccessKey"],
+        aws_session_token=temp_credentials["SessionToken"],
     )
-    
-    # try:
-    #     response = s3_client.upload_file(str(user-name + "profile_picture"), )
-        
-    # else:
-    #     return JSONResponse(content="Successfull request. Added the user to database", status_code=200)
-    # add the necessary data to the user_info table here
-    # 
+    bucket = s3_resource.Bucket("intelligent-investor-analyzer-userprofilepic")
+    obj = bucket.Object(user_profile_pic)
+    try:
+        # inside the parameters, I need to put the file name
+        obj.upload_file(profile_picture_key)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Had trouble uploading profile picture to s3 bucket")
+
+    return {"message": "Successful"}
+
 
 # Fix this code to delete the userID, and all the elements rows that are correlated with this user_id for other tables
 def delete_user_id(user: User):
