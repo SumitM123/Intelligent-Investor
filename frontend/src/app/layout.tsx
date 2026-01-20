@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-
+import IntelligentInvestor from './component/Intelligent Investor Button/intelligentInvestor'
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -35,6 +35,7 @@ export default function RootLayout({
           presses that, then it'll sign out, and the content will change to sign-in. If user presses the profile
           button again, then it will undo the drop down
             If signed in, displays the user profile picture, and name as well right under it */}
+          <IntelligentInvestor/>
           
       </div>
       <body

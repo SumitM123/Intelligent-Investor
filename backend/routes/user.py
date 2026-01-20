@@ -48,6 +48,40 @@ def get_user_id(google_id: str, response: Response):
         raise HTTPException(status_code=400, detail="Invalid request. User doesn't exist")
     
     response.set_cookie(key="user_id", value=str(user_id), max_age=300000, path="/api", httponly=True)
+    
+    name = None
+    email = None
+    profile_picture_key = None
+    # from the user_id, get the attributes connected to this user_id from user_info
+    with SessionLocal() as session:
+        result = session.execute(text("SELECT name, email, profile_picture_key FROM user_info WHERE user_id = :user_id"), {"user_id": user_id})
+        row = result.fetchone()
+        name = row[0]
+        email = row[1]
+        profile_picture_key = row[2]
+    
+    # generate presignedURL after assuming IAM role 
+    sts = boto3.client("sts")
+    role = sts.assume_role(RoleArn="arn:aws:iam::782634014252:role/S3_Full_Access", RoleSessionName="S3 Full Access Role")
+    temp_credentials = role["Credentials"]
+    s3_client = boto3.client(
+        "s3",
+        aws_access_key_id=temp_credentials["AccessKeyId"],
+        aws_secret_access_key=temp_credentials["SecretAccessKey"],
+        aws_session_token=temp_credentials["SessionToken"],
+    )
+    presigned_url = s3_client.generate_presigned_url(
+        ClientMethod='get_object',
+        Params={
+            'Bucket': 'intelligent-investor-analyzer-userprofilepic',
+            'Key': str(profile_picture_key)
+        },
+        ExpiresIn=3600  
+    )
+
+
+    # RETURN THE PRESIGNED URL AND EVERYTHING IN THIS 
+    # generate the presigned_url from the S3 bucket
     return {"Message": "Success"}
 
 
