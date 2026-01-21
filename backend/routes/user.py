@@ -82,7 +82,11 @@ def get_user_id(google_id: str, response: Response):
 
     # RETURN THE PRESIGNED URL AND EVERYTHING IN THIS 
     # generate the presigned_url from the S3 bucket
-    return {"Message": "Success"}
+    return {"Content": {
+        "user_name": name,
+        "email": email,
+        "presigned_URL_profile_pic": presigned_url
+    }, "message": "Successful request"}
 
 
 class User(BaseModel):

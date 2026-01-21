@@ -34,8 +34,13 @@ export default function RootLayout({
           If user is signed in, then this is clicked, a lil drop down will appear saying sign out. If the user
           presses that, then it'll sign out, and the content will change to sign-in. If user presses the profile
           button again, then it will undo the drop down
-            If signed in, displays the user profile picture, and name as well right under it */}
+            If signed in, displays the user profile picture, and name as well right under it 
+          Initially, the Sign In component will receive no values so when you click on it, it'll take you to the sign in page
+            After user goes to sign in page, and signs in through google, then it'll change the value
+          */}
+          
           <IntelligentInvestor/>
+          <
           
       </div>
       <body
