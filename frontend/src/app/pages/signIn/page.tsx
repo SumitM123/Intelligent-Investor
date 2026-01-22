@@ -1,62 +1,95 @@
-import React from "react";
-function SignInPage () {
+"use client";
+
+import Script from "next/script";
+import { useCallback, useEffect, useState } from "react";
+declare global {
+    interface Window {
+        google?: {
+            accounts: {
+                id: {
+                    initialize: (options: {
+                        client_id: string;
+                        callback: (response: { credential: string }) => void;
+                        auto_select?: boolean;
+                    }) => void;
+                    renderButton: (
+                        element: HTMLElement | null,
+                        options: {
+                            theme?: string;
+                            size?: string;
+                            type?: string;
+                        }
+                    ) => void;
+                };
+            };
+        };
+    }
+}
+
+const decodeJWT = (token: string) => {
+    const base64Url = token.split(".")[1];
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+    const jsonPayload = decodeURIComponent(
+        atob(base64)
+            .split("")
+            .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+            .join("")
+    );
+    return JSON.parse(jsonPayload);
+};
+
+const SignInPage = () => {
+    const [googleID, setGoogleID] = useState(String);
+    const [name, setName] = useState(String);
+    const [email, setEmail] = useState(String);
+    const handleCredentialResponse = useCallback((response: { credential: string }) => {
+        console.log("Encoded JWT ID token:", response.credential);
+        const payload = decodeJWT(response.credential);
+        console.log("Decoded JWT ID token fields:", payload);
+        setGoogleID(payload.sub);
+        setName(payload.name);
+        setEmail(payload.email);
+        const formData = new FormData();
+        formData.append("Name", name);
+        formData.append("googleID", googleID);
+        formData.append("email", email);
+        
+
+    }, []);
+
+    useEffect(() => {
+        if (!window.google) {
+            return;
+        }
+
+        const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+        if (!clientId) {
+            console.warn("Missing NEXT_PUBLIC_GOOGLE_CLIENT_ID");
+            return;
+        }
+
+        window.google.accounts.id.initialize({
+            client_id: clientId,
+            callback: handleCredentialResponse,
+            auto_select: false,
+        });
+
+        window.google.accounts.id.renderButton(document.getElementById("googleSignInDiv"), {
+            theme: "outline",
+            size: "large",
+            type: "standard",
+        });
+    }, [handleCredentialResponse]);
 
     return (
         <>
-            <h1>
-                Sign in Page
-            </h1>
-            <head>
-    <script src="https://accounts.google.com/gsi/client" async></script>
-
-    <script>
-      function decodeJWT(token) {
-
-            let base64Url = token.split(".")[1];
-            let base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
-            let jsonPayload = decodeURIComponent(
-            atob(base64)
-                .split("")
-                .map(function (c) {
-                return "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2);
-                })
-                .join("")
-            );
-            return JSON.parse(jsonPayload);
-        }
-
-        function handleCredentialResponse(response) {
-
-            console.log("Encoded JWT ID token: " + response.credential);
-
-            const responsePayload = decodeJWT(response.credential);
-
-            console.log("Decoded JWT ID token fields:");
-            console.log("  Full Name: " + responsePayload.name);
-            console.log("  Given Name: " + responsePayload.given_name);
-            console.log("  Family Name: " + responsePayload.family_name);
-            console.log("  Unique ID: " + responsePayload.sub);
-            console.log("  Profile image URL: " + responsePayload.picture);
-            console.log("  Email: " + responsePayload.email);
-        }
-        </script>
-    </head>
-    <body>
-        <!-- g_id_onload contains Google Identity Services settings -->
-        <div
-        id="g_id_onload"
-        data-auto_prompt="false"
-        data-callback="handleCredentialResponse"
-        data-client_id="PUT_YOUR_WEB_CLIENT_ID_HERE"
-        ></div>
-        <!-- g_id_signin places the button on a page and supports customization -->
-        <div class="g_id_signin"></div>
-    </body>
+            <Script src="https://accounts.google.com/gsi/client" async defer />
+            <main>
+                <h1>Sign in Page</h1>
+                <div id="googleSignInDiv" />
+            </main>
         </>
-        // Sign in Button
-        
-        
     );
-}
+};
 
 export default SignInPage;

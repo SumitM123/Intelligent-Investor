@@ -24,7 +24,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <div>
+
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+      >
+              <div>
         {/* Inside this Div will be the navbar.
         Inside the navbar, there will be two buttons: Intelligent Investor Analyzer, Sign In
         Intelligent Investor:
@@ -40,13 +44,8 @@ export default function RootLayout({
           */}
           
           <IntelligentInvestor/>
-          <
           
       </div>
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
-        
         {children}
       </body>
     </html>
