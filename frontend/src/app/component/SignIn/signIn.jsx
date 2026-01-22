@@ -16,12 +16,10 @@ import { useState } from "react";
         new state will be displayed. 
             - Would not work because the change of sessionStorage key-value pair won't trigger a rerender. External change
             not internal
-        
-    Server-Actions: USE THIS
-        
-        
 
-    
+        Use Server-Actions:
+            revalidatePath() can be used to bypass the session
+        
 */
 interface SignedIn {
     isSignedIn: boolean;
