@@ -1,5 +1,6 @@
 'use server'
 
+import { profile } from "console";
 import { revalidatePath } from "next/cache";
 import { cookies } from 'next/headers'
 /* 
@@ -11,6 +12,7 @@ export async function passSignInProps(formData: FormData) {
     const userGoogleID = formData.get("googleID");
     const userName = formData.get("name");
     const userEmail = formData.get("email");
+    const profilePictureURL = formData.get("profilePictureURL");
     interface RequestInterface {
         googleID: FormDataEntryValue
     }
@@ -37,8 +39,11 @@ export async function passSignInProps(formData: FormData) {
             throw new Error("Unable to add user");
         }
     } else {
-        cookieStore.set('userName', checkUserExists.json()["content"]?["user_name"]);
-        cookieStore.set('profilePictureURL',checkUserExists.json()["content"]?["presignedURL"] )
+        const userExistsJSON = await checkUserExists.json();
+        cookieStore.set('userName', userExistsJSON.content?.user_name || '');
+        cookieStore.set('profilePictureURL', profilePictureURL?.toString() || '')
     }
     revalidatePath("/");
+    cookieStore.delete("userName");
+    cookieStore.delete("profilePictureURL");
 }

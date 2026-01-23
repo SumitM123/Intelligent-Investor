@@ -51,41 +51,41 @@ def get_user_id(google_id: str | None, response: Response):
     
     name = None
     email = None
-    profile_picture_key = None
+    # profile_picture_key = None
     # from the user_id, get the attributes connected to this user_id from user_info
     with SessionLocal() as session:
-        result = session.execute(text("SELECT name, email, profile_picture_key FROM user_info WHERE user_id = :user_id"), {"user_id": user_id})
+        result = session.execute(text("SELECT name, email FROM user_info WHERE user_id = :user_id"), {"user_id": user_id})
         row = result.fetchone()
         name = row[0]
         email = row[1]
-        profile_picture_key = row[2]
+    #     profile_picture_key = row[2]
     
-    # generate presignedURL after assuming IAM role 
-    sts = boto3.client("sts")
-    role = sts.assume_role(RoleArn="arn:aws:iam::782634014252:role/S3_Full_Access", RoleSessionName="S3 Full Access Role")
-    temp_credentials = role["Credentials"]
-    s3_client = boto3.client(
-        "s3",
-        aws_access_key_id=temp_credentials["AccessKeyId"],
-        aws_secret_access_key=temp_credentials["SecretAccessKey"],
-        aws_session_token=temp_credentials["SessionToken"],
-    )
-    presigned_url = s3_client.generate_presigned_url(
-        ClientMethod='get_object',
-        Params={
-            'Bucket': 'intelligent-investor-analyzer-userprofilepic',
-            'Key': str(profile_picture_key)
-        },
-        ExpiresIn=3600  
-    )
+    # # generate presignedURL after assuming IAM role 
+    # sts = boto3.client("sts")
+    # role = sts.assume_role(RoleArn="arn:aws:iam::782634014252:role/S3_Full_Access", RoleSessionName="S3 Full Access Role")
+    # temp_credentials = role["Credentials"]
+    # s3_client = boto3.client(
+    #     "s3",
+    #     aws_access_key_id=temp_credentials["AccessKeyId"],
+    #     aws_secret_access_key=temp_credentials["SecretAccessKey"],
+    #     aws_session_token=temp_credentials["SessionToken"],
+    # )
+    # presigned_url = s3_client.generate_presigned_url(
+    #     ClientMethod='get_object',
+    #     Params={
+    #         'Bucket': 'intelligent-investor-analyzer-userprofilepic',
+    #         'Key': str(profile_picture_key)
+    #     },
+    #     ExpiresIn=3600  
+    # )
 
 
     # RETURN THE PRESIGNED URL AND EVERYTHING IN THIS 
     # generate the presigned_url from the S3 bucket
     return {"content": {
         "user_name": name,
-        "email": email,
-        "presigned_URL_profile_pic": presigned_url
+        "email": email
+        # "presigned_URL_profile_pic": presigned_url
     }, "message": "Successful request"}
 
 
@@ -99,7 +99,7 @@ class User(BaseModel):
 # change this function because profilePicture being uploaded is a public image URL (string)
 @router.post('/addUser')
 def add_user_id( # user_profile_pic: Annotated[bytes, File()], <- Don't need this because we need the name of the file
-                user_profile_pic: UploadFile,
+                # user_profile_pic: UploadFile,
                 user_email: Annotated[str, Form()],
                 user_name: Annotated[str, Form()],
                 google_id: Annotated[str, Form()], 
@@ -134,11 +134,11 @@ def add_user_id( # user_profile_pic: Annotated[bytes, File()], <- Don't need thi
         raise HTTPException(status_code=400, detail="Unable to add user")
 
     # add information to the user_info table
-    profile_picture_key = nanoid.generate()
+    # profile_picture_key = nanoid.generate()
     with SessionLocal() as session:
         try:
-            session.execute(text("INSERT INTO user_info (user_id, name, email, profile_picture_key) VALUES (:user_id, :name, :email, :profile_picture_key)"), 
-                                    {"user_id": user_id, "name": user_name, "email": user_email, "profile_picture_key": profile_picture_key})
+            session.execute(text("INSERT INTO user_info (user_id, name, email) VALUES (:user_id, :name, :email)"), 
+                                    {"user_id": user_id, "name": user_name, "email": user_email})
             inserted = True
         except:
             session.rollback()
@@ -147,27 +147,27 @@ def add_user_id( # user_profile_pic: Annotated[bytes, File()], <- Don't need thi
     '''
         Add the profile picture of the user to S3 bucket with the profile_picture_key as the key to the object that's going to be stored in S3 bucket
     '''
-    if inserted == False:
-        # return JSONResponse(content="Failed to add User", status_code=400)
-        raise HTTPException(status_code=400, detail="Unable to add user to database")
-    # FIRST ASSUME THE ROLE, AND THEN UPLOAD TO THE BUCKET
-    sts = boto3.client("sts")
-    role = sts.assume_role(RoleArn="arn:aws:iam::782634014252:role/S3_Full_Access", RoleSessionName="S3 Full Access Role")
-    temp_credentials = role["Credentials"]
+    # if inserted == False:
+    #     # return JSONResponse(content="Failed to add User", status_code=400)
+    #     raise HTTPException(status_code=400, detail="Unable to add user to database")
+    # # FIRST ASSUME THE ROLE, AND THEN UPLOAD TO THE BUCKET
+    # sts = boto3.client("sts")
+    # role = sts.assume_role(RoleArn="arn:aws:iam::782634014252:role/S3_Full_Access", RoleSessionName="S3 Full Access Role")
+    # temp_credentials = role["Credentials"]
 
-    s3_resource = boto3.resource(
-        "s3",
-        aws_access_key_id=temp_credentials["AccessKeyId"],
-        aws_secret_access_key=temp_credentials["SecretAccessKey"],
-        aws_session_token=temp_credentials["SessionToken"],
-    )
-    bucket = s3_resource.Bucket("intelligent-investor-analyzer-userprofilepic")
-    obj = bucket.Object(user_profile_pic)
-    try:
-        # inside the parameters, I need to put the file name
-        obj.upload_file(profile_picture_key)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Had trouble uploading profile picture to s3 bucket")
+    # s3_resource = boto3.resource(
+    #     "s3",
+    #     aws_access_key_id=temp_credentials["AccessKeyId"],
+    #     aws_secret_access_key=temp_credentials["SecretAccessKey"],
+    #     aws_session_token=temp_credentials["SessionToken"],
+    # )
+    # bucket = s3_resource.Bucket("intelligent-investor-analyzer-userprofilepic")
+    # obj = bucket.Object(user_profile_pic)
+    # try:
+    #     # inside the parameters, I need to put the file name
+    #     obj.upload_file(profile_picture_key)
+    # except Exception:
+    #     raise HTTPException(status_code=400, detail="Had trouble uploading profile picture to s3 bucket")
 
     return {"message": "Successful"}
 

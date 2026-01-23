@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import IntelligentInvestor from './component/Intelligent Investor Button/intelligentInvestor'
+import { cookies } from "next/headers";
+import SignIn from "./component/SignIn/signIn"
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -19,15 +21,23 @@ export const metadata: Metadata = {
 
 /*Make a GET Request to the backend for user ID. So when server-action revalidates the path, it'll pass the proper paramaters to
 client component */
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const userID = fetch("")
+  // You cannot call await inside JSX components, but outside is fine.
+  const cookieStore = await cookies();
+  const userNameVal = cookieStore.get("userName")?.value;
+  const profilePictureURL = cookieStore.get("profilePictureURL")?.value;
+
+  const authData = {
+    isSignedIn: !!(userNameVal && profilePictureURL),
+    userName: userNameVal || "Sign In",
+    profilePicture: profilePictureURL || "",
+  };
   return (
     <html lang="en">
-
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
@@ -45,7 +55,7 @@ export default function RootLayout({
           Initially, the Sign In component will receive no values so when you click on it, it'll take you to the sign in page
             After user goes to sign in page, and signs in through google, then it'll change the value
           */}
-          
+          <SignIn {...authData}/>
           <IntelligentInvestor/>
           
       </div>
