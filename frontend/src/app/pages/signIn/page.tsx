@@ -2,6 +2,7 @@
 
 import Script from "next/script";
 import { useCallback, useEffect, useState } from "react";
+import { passSignInProps } from "../../actions"
 declare global {
     interface Window {
         google?: {
@@ -42,6 +43,7 @@ const SignInPage = () => {
     const [googleID, setGoogleID] = useState(String);
     const [name, setName] = useState(String);
     const [email, setEmail] = useState(String);
+    const [profilePicture, setProfilePicture] = useState(String);
     const handleCredentialResponse = useCallback((response: { credential: string }) => {
         console.log("Encoded JWT ID token:", response.credential);
         const payload = decodeJWT(response.credential);
@@ -49,12 +51,13 @@ const SignInPage = () => {
         setGoogleID(payload.sub);
         setName(payload.name);
         setEmail(payload.email);
+        setProfilePicture(payload.picture);
         const formData = new FormData();
-        formData.append("Name", name);
+        formData.append("name", name);
         formData.append("googleID", googleID);
         formData.append("email", email);
-        
-
+        formData.append("profilePictureURL", profilePicture);
+        passSignInProps(formData);
     }, []);
 
     useEffect(() => {

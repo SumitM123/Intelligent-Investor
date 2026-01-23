@@ -82,7 +82,7 @@ def get_user_id(google_id: str | None, response: Response):
 
     # RETURN THE PRESIGNED URL AND EVERYTHING IN THIS 
     # generate the presigned_url from the S3 bucket
-    return {"Content": {
+    return {"content": {
         "user_name": name,
         "email": email,
         "presigned_URL_profile_pic": presigned_url
@@ -95,6 +95,8 @@ class User(BaseModel):
 '''
     If there is a new user, it'll add the user to the users_id table, as well as the user_info table
 '''
+
+# change this function because profilePicture being uploaded is a public image URL (string)
 @router.post('/addUser')
 def add_user_id( # user_profile_pic: Annotated[bytes, File()], <- Don't need this because we need the name of the file
                 user_profile_pic: UploadFile,
