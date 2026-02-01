@@ -1,7 +1,7 @@
 'use client'
 import React from "react";
-import { useState } from "react";
 import Image from "next/image";
+import { useState, useEffect } from "react";
 // THIS FILE ISN'T FOR THE ACTUAL PAGE. IT'S ONLY FOR WHAT NEEDS TO BE DISPLAYED INSIDE THE SIGNIN SECTION OF NAVBAR
 /* 
     Instead of props, let's do sessionStorage. If you do props, we're going to have to use Server Actions
@@ -33,9 +33,18 @@ export default function SignIn({isSignedIn, profilePicture, userName} : SignedIn
     // default values if not signed in
     const [name, setName] = useState<string>(userName || "Sign In");
     const [userImage, setUserImage] = useState<string | undefined> (profilePicture);
+    const [signedIn, setSignedIn] = useState<boolean>(isSignedIn);
+    // useEffect( () => {
+    //     if (signedIn) {
+    //         //set the specific properties
+            
+    //     } else {
+
+    //     }
+    // }, [signedIn]);
     return (
         <div>
-            {userImage && <Image src={userImage} width={50} height={50} alt=""/>}
+            {userImage && <Image src={userImage} alt="User" width={50} height={50} />}
             <a>
                 {name}
             </a>
