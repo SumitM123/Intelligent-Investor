@@ -1,5 +1,7 @@
+'use client'
 import React from "react";
 import { useState } from "react";
+import Image from "next/image";
 // THIS FILE ISN'T FOR THE ACTUAL PAGE. IT'S ONLY FOR WHAT NEEDS TO BE DISPLAYED INSIDE THE SIGNIN SECTION OF NAVBAR
 /* 
     Instead of props, let's do sessionStorage. If you do props, we're going to have to use Server Actions
@@ -26,14 +28,17 @@ interface SignedIn {
     profilePicture: string; // it'll be the key of the object stored in the s3 bucket or you can serialize the file by turning it into a base64 encoder
     userName: string;
 }
-'use client'
+
 export default function SignIn({isSignedIn, profilePicture, userName} : SignedIn) {
     // default values if not signed in
     const [name, setName] = useState<string>(userName || "Sign In");
-    const [userImage, setUserImage] = useState<File | null> (null);
+    const [userImage, setUserImage] = useState<string | undefined> (profilePicture);
     return (
-        <h1>
-        
-        </h1>
+        <div>
+            {userImage && <Image src={userImage} width={50} height={50} alt=""/>}
+            <a>
+                {name}
+            </a>
+        </div>
     );
 }

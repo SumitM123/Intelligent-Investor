@@ -16,7 +16,6 @@ export default function NavBar({props}: {
                 </Link>
                 {}
                 <Link href={"/pages/signIn"}> Sign In </Link>
-            </h1>
 
         </div>
     )

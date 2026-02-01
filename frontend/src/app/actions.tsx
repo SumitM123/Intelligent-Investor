@@ -24,7 +24,7 @@ export async function passSignInProps(formData: FormData) {
 
     // Ensure the value is a string (use empty string if null/File)
     const idValue = typeof getRequestParams.googleID === 'string' ? getRequestParams.googleID : '';
-    url.searchParams.set("googleID", idValue);
+    url.searchParams.set("google_id", idValue);
 
     let checkUserExists = await fetch(url.toString());
     const cookieStore = await cookies();
