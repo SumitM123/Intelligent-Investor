@@ -7,7 +7,6 @@ from fastapi import HTTPException
 from fastapi import Body
 from sqlalchemy import text
 from typing import Annotated
-import nanoid
 import boto3
 '''
     - Created a new table that stores user's personal information
