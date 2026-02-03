@@ -2,6 +2,7 @@
 
 import Script from "next/script";
 import { useCallback, useEffect, useState } from "react";
+import { passSignInProps } from "@/app/actions";
 declare global {
     interface Window {
         google?: {
@@ -50,11 +51,11 @@ const SignInPage = () => {
         setName(payload.name);
         setEmail(payload.email);
         const formData = new FormData();
-        formData.append("Name", name);
-        formData.append("googleID", googleID);
-        formData.append("email", email);
+        formData.append("Name", payload.name);
+        formData.append("googleID", payload.sub);
+        formData.append("email", payload.email);
+        passSignInProps(formData);
         
-
     }, []);
 
     useEffect(() => {
