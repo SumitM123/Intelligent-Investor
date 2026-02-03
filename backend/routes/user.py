@@ -27,7 +27,7 @@ router = APIRouter(prefix="/api/users")
 '''
     Based on the google_id, it'll get the respective UUID and assign the UUID as a cookie 
 '''
-@router.get("/getUserID/")
+@router.get("/getUserID")
 def get_user_id(google_id: str | None, response: Response):
     user_id = None
     with SessionLocal() as session:
