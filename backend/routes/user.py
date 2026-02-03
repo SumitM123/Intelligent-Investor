@@ -103,6 +103,9 @@ def add_user_id( # user_profile_pic: Annotated[bytes, File()], <- Don't need thi
                 user_name: Annotated[str, Form()],
                 google_id: Annotated[str, Form()], 
                 response: Response):
+    print("User email: " + user_email)
+    print("User name: " + user_name)
+    print("Google ID: " + google_id)
     # user = user_class.model_dump()
     inserted = False
     user_id = None
@@ -113,7 +116,7 @@ def add_user_id( # user_profile_pic: Annotated[bytes, File()], <- Don't need thi
         if result.scalars() == True:
             response.set_cookie(key="user_id", value=result.scalars().first(), max_age=300000, path="/api", httponly=True)
             user_id = result.scalars().first()
-            return JSONResponse(content="User already exists", status_code=200)
+            return JSONResponse(content="User already exists", status_code=208)
         # if user doesn't already exist, then insert and set the respective cookie
         try:
             session.execute(text("INSERT INTO users_id (google_id) VALUES (:google_id)"), {"google_id": google_id})
