@@ -109,28 +109,27 @@ def add_user_id( # user_profile_pic: Annotated[bytes, File()], <- Don't need thi
     # add the google_id, user_id entry in the users_id table
     with SessionLocal() as session:
         # checking if user already exists inside the database. If so, add the respective cookie
-        result = session.execute(text("SELECT EXISTS(SELECT 1 FROM users_id WHERE google_id = :google_id)"), {"google_id": google_id})
-        if result.scalars() == True:
-            response.set_cookie(key="user_id", value=result.scalars().first(), max_age=300000, path="/api", httponly=True)
-            user_id = result.scalars().first()
+        result = session.execute(text("SELECT EXISTS(SELECT 1 FROM users_id WHERE google_id = :google_id)"), {"google_id": google_id}).scalar_one()
+        if result:
+            user_id = session.execute(
+                text("SELECT user_id FROM users_id WHERE google_id = :google_id"),
+                {"google_id": google_id},
+            ).scalar_one()
+            response.set_cookie(key="user_id", value=user_id, max_age=300000, path="/api", httponly=True)
             return JSONResponse(content="User already exists", status_code=200)
         # if user doesn't already exist, then insert and set the respective cookie
         try:
             session.execute(text("INSERT INTO users_id (google_id) VALUES (:google_id)"), {"google_id": google_id})
-            result = session.execute(text("SELECT user_id FROM users_id WHERE google_id = :google_id"), {"google_id": google_id})
-            response.set_cookie(key="user_id", value=result.scalars().first(), max_age=300000, path="/api", httponly=True)
-            user_id = result.scalars().first()
+            user_id = session.execute(text("SELECT user_id FROM users_id WHERE google_id = :google_id"), {"google_id": google_id}).scalar_one()
+            response.set_cookie(key="user_id", value=user_id, max_age=300000, path="/api", httponly=True)
             inserted = True
-        except:
+        except Exception as exec:
             session.rollback()
             inserted = False
-        
+            raise HTTPException(status_code=400, detail=f"Unable to add user_id: {exc}")
+ 
         session.commit()
 
-
-    if inserted == False:
-        # return JSONResponse(content="Failed to add User", status_code=400)
-        raise HTTPException(status_code=400, detail="Unable to add user")
 
     # add information to the user_info table
     # profile_picture_key = nanoid.generate()
@@ -139,10 +138,14 @@ def add_user_id( # user_profile_pic: Annotated[bytes, File()], <- Don't need thi
             session.execute(text("INSERT INTO user_info (user_id, name, email) VALUES (:user_id, :name, :email)"), 
                                     {"user_id": user_id, "name": user_name, "email": user_email})
             inserted = True
-        except:
+        except Exception as exc:
             session.rollback()
             inserted = False
-    
+            raise HTTPException(status_code=400, detail=f"Unable to add user info: {exc}")
+
+    if inserted == False:
+        # return JSONResponse(content="Failed to add User", status_code=400)
+        raise HTTPException(status_code=400, detail="Unable to add user info to table")
     '''
         Add the profile picture of the user to S3 bucket with the profile_picture_key as the key to the object that's going to be stored in S3 bucket
     '''
