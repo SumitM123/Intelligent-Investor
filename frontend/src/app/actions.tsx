@@ -61,6 +61,8 @@ export async function passSignInProps(formData: FormData) {
         // const userData: any = await addUser.json();
         // (await cookieStore).set('userName', userData?.content?.user_name ?? '');
         // (await cookieStore).set('profilePictureURL', userData?.content?.presignedURL ?? '');
+        const body = await checkUserExists.text();
+        console.error("getUserID failed", checkUserExists.status, body);
         throw Error("Cannot add user");
     } 
     const cookieStore = cookies();
