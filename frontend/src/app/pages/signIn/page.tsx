@@ -60,7 +60,7 @@ const SignInPage = () => {
         
     }, []);
 
-    useEffect(() => {
+    const initGoogleButton = useCallback(() => {
         if (!window.google) {
             return;
         }
@@ -84,9 +84,13 @@ const SignInPage = () => {
         });
     }, [handleCredentialResponse]);
 
+    useEffect(() => {
+        initGoogleButton();
+    }, [initGoogleButton]);
+
     return (
         <>
-            <Script src="https://accounts.google.com/gsi/client" async defer />
+            <Script src="https://accounts.google.com/gsi/client" async defer onLoad={initGoogleButton} />
             <main>
                 <h1>Sign in Page</h1>
                 <div id="googleSignInDiv" />
