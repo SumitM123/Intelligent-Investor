@@ -17,9 +17,6 @@ export default function HomePage() {
     
     return (
         <>
-            <h1>
-                Intelligent Investor Analyzer
-            </h1>
             <Link href={'/pages/signIn'}> Sign In </Link>
         </>
     );
