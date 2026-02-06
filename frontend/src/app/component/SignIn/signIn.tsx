@@ -2,6 +2,7 @@
 import React from "react";
 import Image from "next/image";
 import { useState, useEffect } from "react";
+import { cookies } from "next/headers";
 // THIS FILE ISN'T FOR THE ACTUAL PAGE. IT'S ONLY FOR WHAT NEEDS TO BE DISPLAYED INSIDE THE SIGNIN SECTION OF NAVBAR
 /* 
     Instead of props, let's do sessionStorage. If you do props, we're going to have to use Server Actions
@@ -42,13 +43,70 @@ export default function SignIn({isSignedIn, profilePicture, userName} : SignedIn
 
     //     }
     // }, [signedIn]);
+
+    /*
+    If signed in, and hovered over the component, replace it with sign out. If pressed signed out, 
+    then remove the cookies and change the content of the component as well. 
+    */
+    const [stateSignedIn, setStateSignedIn] = useState(isSignedIn);
+    //content inside div is ONLY for when user is already signed in
+    const [contentInsideDiv, setContentInsideDiv] = useState<React.ReactNode>("Sign In");
+    const [goingInsideDiv, setGoingInsideDiv] = useState(false);
+    //will trigger at each render
+    useEffect( () => { 
+        setStateSignedIn(isSignedIn);
+    });
+    
     const displayName = userName || "Sign In";
+    const displayingSignOut = (goingIn : boolean): void => {
+        if (goingIn) {
+            setGoingInsideDiv(true);
+        } else {
+            setGoingInsideDiv(false);
+        }
+    }
+    const signOut = async () : Promise<void> => {
+        // remove the 'user id' key-value pair inside the cookie store
+        const cookieStore = await cookies();
+        cookieStore.delete("user_id");
+        
+        // change the state of signed in to false
+        setStateSignedIn(false);
+        // change the component to sign in 
+
+    }
+    useEffect( () => { 
+        if (goingInsideDiv) {
+            setContentInsideDiv(
+                <>
+                    {profilePicture && (
+                        <Image src={profilePicture} alt="User" width={50} height={50} />
+                    )}
+                    <a>{displayName}</a>
+                </>
+            );
+        } else {
+            setContentInsideDiv(
+                <>
+                    <button onClick={signOut}>
+                        Sign out
+                    </button>
+                </>
+            )
+        }
+    }, [goingInsideDiv])
     return (
         <div>
-            {isSignedIn && profilePicture && (
-                <Image src={profilePicture} alt="User" width={50} height={50} />
-            )}
-            <a>{displayName}</a>
+            {/* Have a div so that it'll change based on the isSignedIn variable */}
+            {stateSignedIn && 
+            <div onMouseOver={() => displayingSignOut(true)} onMouseLeave={() => displayingSignOut(false)}>
+                {contentInsideDiv}
+            </div>
+            }
+            {!!stateSignedIn && 
+            <div>
+                <a> {displayName} </a>
+            </div>}
         </div>
     );
 }
