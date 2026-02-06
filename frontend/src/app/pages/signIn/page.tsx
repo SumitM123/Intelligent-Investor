@@ -40,6 +40,7 @@ const decodeJWT = (token: string) => {
 };
 
 const SignInPage = () => {
+    // State variables might not be necessary
     const [googleID, setGoogleID] = useState(String);
     const [name, setName] = useState(String);
     const [email, setEmail] = useState(String);
@@ -54,6 +55,7 @@ const SignInPage = () => {
         formData.append("Name", payload.name);
         formData.append("googleID", payload.sub);
         formData.append("email", payload.email);
+        formData.append("profilePictureURL", payload.picture)
         passSignInProps(formData);
         
     }, []);

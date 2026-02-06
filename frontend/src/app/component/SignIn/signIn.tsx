@@ -31,9 +31,9 @@ interface SignedIn {
 
 export default function SignIn({isSignedIn, profilePicture, userName} : SignedIn) {
     // default values if not signed in
-    const [name, setName] = useState<string>(userName || "Sign In");
-    const [userImage, setUserImage] = useState<string | undefined> (profilePicture);
-    const [signedIn, setSignedIn] = useState<boolean>(isSignedIn);
+    // const [name, setName] = useState<string>(userName || "Sign In");
+    // const [userImage, setUserImage] = useState<string | undefined> (profilePicture);
+    // const [signedIn, setSignedIn] = useState<boolean>(isSignedIn);
     // useEffect( () => {
     //     if (signedIn) {
     //         //set the specific properties
@@ -42,12 +42,13 @@ export default function SignIn({isSignedIn, profilePicture, userName} : SignedIn
 
     //     }
     // }, [signedIn]);
+    const displayName = userName || "Sign In";
     return (
         <div>
-            {userImage && <Image src={userImage} alt="User" width={50} height={50} />}
-            <a>
-                {name}
-            </a>
+            {isSignedIn && profilePicture && (
+                <Image src={profilePicture} alt="User" width={50} height={50} />
+            )}
+            <a>{displayName}</a>
         </div>
     );
 }
