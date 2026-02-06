@@ -50,41 +50,7 @@ def get_user_id(google_id: str | None, response: Response):
         ).fetchone()
     if not info:
         raise HTTPException(status_code=400, detail="User info not found")
-
-    name, email = info
-    return {"content": {"user_name": name, "email": email}, "message": "Successful request"}
-# def get_user_id(google_id: str | None, response: Response):
-#     if not google_id:
-#         raise HTTPException(status_code=400, detail="Missing google_id")
-#     user_id = None
-#     with SessionLocal() as session:
-#         try:
-#             result = session.execute(text("SELECT user_id FROM users_id WHERE google_id = :google_id"), 
-#                             {"google_id": google_id}).fetchone()
-#             # check if there is user exist
-#             if not result:
-#                 raise HTTPException(status_code=400, detail="Invalid request. User doesn't exist")
-#             user_id = result[0]
-#         except:
-#             session.rollback()
-#             user_id = None
-    
-#     response.set_cookie(key="user_id", value=str(user_id), max_age=300000, path="/api", httponly=True)
-    
-#     name = None
-#     email = None
-#     # profile_picture_key = None
-#     # from the user_id, get the attributes connected to this user_id from user_info
-#     with SessionLocal() as session:
-#         result = session.execute(text("SELECT name, email FROM user_info WHERE user_id = :user_id"), {"user_id": user_id})
-#         if not result:
-#             raise HTTPException(status_code=400, detail="User info not found")
-#         row = result.fetchone()
-#         name = row[0]
-#         email = row[1]
-#     #     profile_picture_key = row[2]
-    
-#     # # generate presignedURL after assuming IAM role 
+    #     # # generate presignedURL after assuming IAM role 
 #     # sts = boto3.client("sts")
 #     # role = sts.assume_role(RoleArn="arn:aws:iam::782634014252:role/S3_Full_Access", RoleSessionName="S3 Full Access Role")
 #     # temp_credentials = role["Credentials"]
@@ -102,15 +68,9 @@ def get_user_id(google_id: str | None, response: Response):
 #     #     },
 #     #     ExpiresIn=3600  
 #     # )
+    name, email = info
+    return {"content": {"user_name": name, "email": email}, "message": "Successful request"}
 
-
-#     # RETURN THE PRESIGNED URL AND EVERYTHING IN THIS 
-#     # generate the presigned_url from the S3 bucket
-#     return {"content": {
-#         "user_name": name,
-#         "email": email
-#         # "presigned_URL_profile_pic": presigned_url
-#     }, "message": "Successful request"}
 
 
 class User(BaseModel):
@@ -137,7 +97,18 @@ def add_user_id(
             text("SELECT user_id FROM users_id WHERE google_id = :google_id"),
             {"google_id": google_id},
         ).scalar_one_or_none()
+        # if user_id already does exist
         if existing_id is not None:
+            info_exists = session.execute(
+                text("SELECT 1 FROM user_info WHERE user_id = :user_id"),
+                {"user_id": existing_id},
+            ).fetchone()
+            if not info_exists:
+                session.execute(
+                    text("INSERT INTO user_info (user_id, name, email) VALUES (:user_id, :name, :email)"),
+                    {"user_id": existing_id, "name": user_name, "email": user_email},
+                )
+                session.commit()
             response.set_cookie(key="user_id", value=existing_id, max_age=300000, path="/api", httponly=True)
             return JSONResponse(content="User already exists", status_code=200)
 
@@ -155,50 +126,8 @@ def add_user_id(
         session.commit()
 
     response.set_cookie(key="user_id", value=user_id, max_age=300000, path="/api", httponly=True)
-    return {"message": "Successful"}
-# def add_user_id( # user_profile_pic: Annotated[bytes, File()], <- Don't need this because we need the name of the file
-#                 # user_profile_pic: UploadFile,
-#                 user_email: Annotated[str, Form()],
-#                 user_name: Annotated[str, Form()],
-#                 google_id: Annotated[str, Form()], 
-#                 response: Response):
-#     print("User email: " + user_email)
-#     print("User name: " + user_name)
-#     print("Google ID: " + google_id)
-#     # user = user_class.model_dump()
-#     inserted = False
-#     user_id = None
-#     # add the google_id, user_id entry in the users_id table
-#     with SessionLocal() as session:
-#         # checking if user already exists inside the database. If so, add the respective cookie
-#         result = session.execute(text("SELECT EXISTS(SELECT 1 FROM users_id WHERE google_id = :google_id)"), {"google_id": google_id}).scalar_one_or_none()
-#         if result is not None:
-#             response.set_cookie(key="user_id", value=result, max_age=300000, path="/api", httponly=True)
-#             return JSONResponse(content="User already exists", status_code=208)
-        
-#         result = session.execute(text("SELECT EXISTS(SELECT 1 FROM users_id WHERE google_id = :google_id)"), {"google_id": google_id}).scalar_one()
-#         if result:
-#             user_id = session.execute(
-#                 text("SELECT user_id FROM users_id WHERE google_id = :google_id"),
-#                 {"google_id": google_id},
-#             ).scalar_one()
-#             response.set_cookie(key="user_id", value=user_id, max_age=300000, path="/api", httponly=True)
-#             return JSONResponse(content="User already exists", status_code=200)
-#         # if user doesn't already exist, then insert and set the respective cookie
-#         try:
-#             session.execute(text("INSERT INTO users_id (google_id) VALUES (:google_id)"), {"google_id": google_id})
-#             user_id = session.execute(text("SELECT user_id FROM users_id WHERE google_id = :google_id"), {"google_id": google_id}).scalar_one()
-#             response.set_cookie(key="user_id", value=user_id, max_age=300000, path="/api", httponly=True)
-#             inserted = True
-#         except Exception as exec:
-#             session.rollback()
-#             inserted = False
-#             raise HTTPException(status_code=400, detail=f"Unable to add user_id: {exc}")
- 
-#         session.commit()
 
-
-#     # add information to the user_info table
+    #     # add information to the user_info table
 #     # profile_picture_key = nanoid.generate()
 #     with SessionLocal() as session:
 #         try:
@@ -210,9 +139,9 @@ def add_user_id(
 #             inserted = False
 #             raise HTTPException(status_code=400, detail=f"Unable to add user info: {exc}")
 
-#     if inserted == False:
-#         # return JSONResponse(content="Failed to add User", status_code=400)
-#         raise HTTPException(status_code=400, detail="Unable to add user info to table")
+#     # if inserted == False:
+#     #     # return JSONResponse(content="Failed to add User", status_code=400)
+#     #     raise HTTPException(status_code=400, detail="Unable to add user info to table")
 #     '''
 #         Add the profile picture of the user to S3 bucket with the profile_picture_key as the key to the object that's going to be stored in S3 bucket
 #     '''
@@ -237,8 +166,10 @@ def add_user_id(
 #     #     obj.upload_file(profile_picture_key)
 #     # except Exception:
 #     #     raise HTTPException(status_code=400, detail="Had trouble uploading profile picture to s3 bucket")
+    return {"message": "Successful"}
 
-#     return {"message": "Successful"}
+
+
 
 
 # Fix this code to delete the userID, and all the elements rows that are correlated with this user_id for other tables
