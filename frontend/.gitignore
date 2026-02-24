@@ -42,3 +42,5 @@ next-env.d.ts
 
 Dockerfile
 Dockerfile.dev
+
+/package-lock.json
