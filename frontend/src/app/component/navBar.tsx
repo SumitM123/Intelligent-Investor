@@ -2,21 +2,42 @@
 import React from "react";
 import { useState } from "react";
 import Link from "next/link";
+import SignIn from "./SignIn/signIn";
 interface NavBarProperties {
     signedIn: boolean;
 }
+// async function SignInServer() {
+//   const cookieStore = await cookies();
+//   const userNameVal = cookieStore.get("userName")?.value;
+//   const profilePictureURL = cookieStore.get("profilePictureURL")?.value;
 
-export default function NavBar({props}: {
-    props: JSON // Might have to change the Object type of props later
-}) {
+//   const authData = {
+//     isSignedIn: !!(userNameVal && profilePictureURL),
+//     userName: userNameVal || "Sign In",
+//     profilePicture: profilePictureURL || "",
+//   };
+
+//   return <SignIn {...authData} />;
+// }
+interface SignedIn {
+    isSignedIn: boolean;
+    profilePicture: string; // it'll be the key of the object stored in the s3 bucket or you can serialize the file by turning it into a base64 encoder
+    userName: string;
+}
+
+export default function NavBar({isSignedIn, userName, profilePicture} : SignedIn) {
     return (
-        <div>
+        <div>   
                 <Link href={"/"}> 
                     Intelligent Investor Analyzer
                 </Link>
-                {}
-                <Link href={"/pages/signIn"}> Sign In </Link>
+                <SignIn isSignedIn={isSignedIn} profilePicture={profilePicture} userName={userName}/>
 
+                {/* <Suspense fallback={<div>Sign In</div>}>
+                    <SignIn isSignedIn={isSignedIn} profilePicture={profilePicture} userName={userName}/>
+                </Suspense> */}
+                {/* <Link href={"/pages/signIn"}> Sign In </Link> */}
+                
         </div>
     )
 }

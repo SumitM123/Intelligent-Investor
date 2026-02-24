@@ -4,6 +4,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { cookies } from "next/headers";
 import "./globals.css";
 import IntelligentInvestor from './component/Intelligent Investor Button/intelligentInvestor'
+import NavBar from "./component/navBar";
 import SignIn from "./component/SignIn/signIn"
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -31,7 +32,7 @@ async function SignInServer() {
     profilePicture: profilePictureURL || "",
   };
 
-  return <SignIn {...authData} />;
+  return <NavBar {...authData} />;
 }
 
 /*Make a GET Request to the backend for user ID. So when server-action revalidates the path, it'll pass the proper paramaters to
@@ -60,10 +61,9 @@ export default async function RootLayout({
           Initially, the Sign In component will receive no values so when you click on it, it'll take you to the sign in page
             After user goes to sign in page, and signs in through google, then it'll change the value
           */}
-          <Suspense fallback={<div>Sign In</div>}>
-            <SignInServer />
+          <Suspense>
+            <SignInServer/>
           </Suspense>
-          <IntelligentInvestor/>
           
       </div>
         {children}
