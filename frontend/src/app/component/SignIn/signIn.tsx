@@ -1,9 +1,10 @@
 'use client'
-import React from "react";
 import Image from "next/image";
 import { useState, useEffect } from "react";
-import { getCookie, setCookie, deleteCookie } from 'cookies-next';
+import { deleteCookie } from 'cookies-next';
 import { useRouter } from 'next/navigation';
+import styles from './signIn.module.css';
+import Link from "next/link";
 
 // THIS FILE ISN'T FOR THE ACTUAL PAGE. IT'S ONLY FOR WHAT NEEDS TO BE DISPLAYED INSIDE THE SIGNIN SECTION OF NAVBAR
 /* 
@@ -39,9 +40,6 @@ export default function SignIn({isSignedIn, profilePicture, userName} : SignedIn
     */
     const router = useRouter();
     const [stateSignedIn, setStateSignedIn] = useState(isSignedIn);
-    //content inside div is ONLY for when user is already signed in
-    const [contentInsideDiv, setContentInsideDiv] = useState<React.ReactNode>("Sign In");
-    const [goingInsideDiv, setGoingInsideDiv] = useState(false);
     
     //will trigger at each render
     useEffect( () => { 
@@ -49,13 +47,7 @@ export default function SignIn({isSignedIn, profilePicture, userName} : SignedIn
     }, [isSignedIn]);
     
     const displayName = userName || "Sign In";
-    const displayingSignOut = (goingIn : boolean): void => {
-        if (goingIn) {
-            setGoingInsideDiv(true);
-        } else {
-            setGoingInsideDiv(false);
-        }
-    }
+
     const signOut = async () : Promise<void> => {
         // remove the 'user id' key-value pair inside the cookie store
         deleteCookie('userName');
@@ -69,37 +61,27 @@ export default function SignIn({isSignedIn, profilePicture, userName} : SignedIn
         router.refresh();
 
     }
-    useEffect( () => { 
-        if (goingInsideDiv) {
-            setContentInsideDiv(
-                <>
-                    {profilePicture && (
-                        <Image src={profilePicture} alt="User" width={50} height={50} />
-                    )}
-                    <a>{displayName}</a>
-                </>
-            );
-        } else {
-            setContentInsideDiv(
-                <>
-                    <button onClick={signOut}>
-                        Sign out
-                    </button>
-                </>
-            )
-        }
-    }, [goingInsideDiv, stateSignedIn])
+
     return (
         <div>
             {/* Have a div so that it'll change based on the isSignedIn variable */}
             {stateSignedIn && 
-            <div onMouseOver={() => displayingSignOut(false)} onMouseLeave={() => displayingSignOut(true)}>
-                {contentInsideDiv}
+            <div className={styles.signedInContainer}>
+                <div className={styles.defaultContent}>
+                    {profilePicture && (
+                        <Image src={profilePicture} alt="User" width={50} height={50} />
+                    )}
+                    <a>{displayName}</a>
+                </div>
+                <button className={styles.signOutButton} onClick={signOut}>
+                    Sign out
+                </button>
             </div>
             }
             {!stateSignedIn && 
             <div>
-                <a> {displayName} </a>
+                {/* <a> {displayName} </a> */}
+                <Link href="/pages/signIn"> {displayName} </Link>
             </div>}
         </div>
     );

@@ -17,7 +17,7 @@ export default function HomePage() {
     
     return (
         <>
-            <Link href={'/pages/signIn'}> Sign In </Link>
+            {/* <Link href={'/pages/signIn'}> Sign In </Link> */}
         </>
     );
 }

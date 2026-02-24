@@ -1,0 +1,23 @@
+.signedInContainer {
+  display: inline-flex;
+  align-items: center;
+}
+
+.defaultContent {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.signOutButton {
+  display: none;
+  cursor: pointer;
+}
+
+.signedInContainer:hover .defaultContent {
+  display: none;
+}
+
+.signedInContainer:hover .signOutButton {
+  display: inline-block;
+}
