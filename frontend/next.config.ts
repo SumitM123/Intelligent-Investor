@@ -1,7 +1,7 @@
 import type { NextConfig } from 'next'
  
 const nextConfig: NextConfig = {
-  cacheComponents: true, // Your existing setting
+  cacheComponents: false, // Your existing setting
   images: {
     remotePatterns: [
       {
