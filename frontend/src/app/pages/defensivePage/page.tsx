@@ -5,7 +5,6 @@ import axios from 'axios';
 // import {UserContext, useUserContext} from '../../Contexts/UserContext'
 function DefensivePage () {
     const [stocks, setStocks] = useState(null);
-    const userContext = useUserContext();
     
     /* 
         Diversifying Porfolio: Each stock is within on industry
@@ -22,15 +21,15 @@ function DefensivePage () {
         Based on the total amount of money, provide a diagram showing the proportion of portfolio 
         going towards investing in each industry
     */
-    useEffect(() => {
-        // This will be added as a query string. If you want to add it as a parameter, then directly just add it to URL
-        const stocksArr = axios.get('/api/stocks/getStocks', {
-            params: {
-                ID: userContext.userID
-            }
-        })
-        const bondsArr = axios.get('/api/stocks/getBonds')
-    }, []);
+    // useEffect(() => {
+    //     // This will be added as a query string. If you want to add it as a parameter, then directly just add it to URL
+    //     const stocksArr = axios.get('/api/stocks/getStocks', {
+    //         params: {
+    //             ID: userContext.userID
+    //         }
+    //     })
+    //     const bondsArr = axios.get('/api/stocks/getBonds')
+    // }, []);
 
     return (
         <h1>
