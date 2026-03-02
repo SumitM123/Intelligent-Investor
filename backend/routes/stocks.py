@@ -29,9 +29,9 @@ class User(BaseModel):
     #     user_id = result.google_id
 
         
-@router.get("/searchStocks")
-async def search_stocks(stocks: str = ""):
-    # Make request to the search bar for update
-    
+# @router.get("/searchStocks")
+# async def search_stocks(stocks: str = ""):
+#     Make request to the search bar for update
+
 
     
