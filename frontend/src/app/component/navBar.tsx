@@ -32,7 +32,9 @@ export default function NavBar({isSignedIn, userName, profilePicture} : SignedIn
                     Intelligent Investor Analyzer
                 </Link>
                 <SignIn isSignedIn={isSignedIn} profilePicture={profilePicture} userName={userName}/>
-
+                <Link href={"/pages/defensivePage"}>
+                    Defensive Page
+                </Link>
                 {/* <Suspense fallback={<div>Sign In</div>}>
                     <SignIn isSignedIn={isSignedIn} profilePicture={profilePicture} userName={userName}/>
                 </Suspense> */}
