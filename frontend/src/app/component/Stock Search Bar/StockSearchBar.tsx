@@ -7,7 +7,11 @@ function StockSearchBar() {
     const [stocks, setStocks] = useState([null]);
     const [searchItem, setSearchItem] = useState("Search for Stock");
     const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-        setSearchItem(event.target.value);
+        if (event.target.value === "") {
+            setSearchItem("Search for Stock")
+        } else {
+            setSearchItem(event.target.value);
+        }
     };
     async function getStocks(url : string) {
         try {
@@ -38,6 +42,7 @@ function StockSearchBar() {
     }, [searchItem]);
     return (
         <input type="text" value={searchItem} onChange={handleChange}> {searchItem}</input>
+        
     );
 }
 export default StockSearchBar();
