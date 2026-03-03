@@ -2,9 +2,9 @@
 import React, { useEffect } from "react";
 import {useState} from 'react';
 import axios from 'axios';
+import StockSearchBar from "@/app/component/Stock Search Bar/StockSearchBar";
 // import {UserContext, useUserContext} from '../../Contexts/UserContext'
 function DefensivePage () {
-    const [stocks, setStocks] = useState(null);
     
     /* 
         Diversifying Porfolio: Each stock is within on industry
@@ -32,9 +32,13 @@ function DefensivePage () {
     // }, []);
 
     return (
-        <h1>
-            Defensive Page
-        </h1>
+        <div>
+            <h1>
+                Defensive Page
+            </h1>
+            <StockSearchBar />
+        </div>
+
     );
 }
 

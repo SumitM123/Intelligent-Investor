@@ -2,47 +2,85 @@
 import React from "react";
 import { useState } from "react";
 import { useEffect } from "react";
+
+type StockMatch = {
+    symbol: string;
+    name: string;
+    currency: string;
+};
+
 function StockSearchBar() {
-    // Each stock will consist of this tuple: (Symbol, name, and currency)
-    const [stocks, setStocks] = useState([null]);
-    const [searchItem, setSearchItem] = useState("Search for Stock");
+    const [stocks, setStocks] = useState<StockMatch[]>([]);
+    const [searchItem, setSearchItem] = useState("");
+
     const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-        if (event.target.value === "") {
-            setSearchItem("Search for Stock")
-        } else {
-            setSearchItem(event.target.value);
-        }
+        setSearchItem(event.target.value);
     };
-    async function getStocks(url : string) {
+
+    async function getStocks(url: string) {
         try {
-            setStocks([]);
             const response = await fetch(url);
             const arrJSON = await response.json();
-            const sizeMin = Math.min(arrJSON["bestMatches"].length, 5)
+
+            if (!arrJSON?.bestMatches) {
+                setStocks([]);
+                return;
+            }
+
+            const sizeMin = Math.min(arrJSON["bestMatches"].length, 5);
+            const nextStocks: StockMatch[] = [];
+
             for (let i = 0; i < sizeMin; i++) {
                 const currentObject = arrJSON["bestMatches"][i];
-                setStocks([...stocks, (currentObject["1. symbol"], currentObject["2. name"], currentObject["8. currency"])]);
+                nextStocks.push({
+                    symbol: currentObject["1. symbol"],
+                    name: currentObject["2. name"],
+                    currency: currentObject["8. currency"],
+                });
             }
-        } catch(error) {
+
+            setStocks(nextStocks);
+        } catch (error) {
             console.error((error as Error).message);
+            setStocks([]);
         }
     }
-    useEffect( () => {
-        //after half a second of no change from searchItem and the value doesn't equal "Search for Stocks", then make request to backend
-        var beforeString = searchItem;
-        var afterString;
-        const timer = setInterval(() => {
-            afterString = searchItem;
-            if (beforeString === afterString) {
-                // call the API to get stocks
-                var url = `https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords=${searchItem}&apikey=${process.env.ALPHA_VANTAGE_API}&datatpye=json`;
-                getStocks(url);
-            }
-        }, 500)
+
+    useEffect(() => {
+        const trimmedSearch = searchItem.trim();
+
+        if (!trimmedSearch) {
+            setStocks([]);
+            return;
+        }
+
+        const timer = setTimeout(() => {
+            const url = `https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords=${encodeURIComponent(trimmedSearch)}&apikey=${process.env.NEXT_PUBLIC_ALPHA_VANTAGE_API}&datatype=json`;
+            getStocks(url);
+        }, 500);
+
+        return () => clearTimeout(timer);
     }, [searchItem]);
+
     return (
-        <input type="text" value={searchItem} onChange={handleChange}> {searchItem}</input>
-        
+        <div>
+            <input
+                type="text"
+                value={searchItem}
+                onChange={handleChange}
+                placeholder="Search for Stock"
+            />
+
+            {searchItem.trim() !== "" && stocks.length > 0 && (
+                <ul>
+                    {stocks.map((stock) => (
+                        <li key={`${stock.symbol}-${stock.name}`}>
+                            {stock.symbol} - {stock.name} ({stock.currency})
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </div>
     );
 }
-export default StockSearchBar();
+export default StockSearchBar;
