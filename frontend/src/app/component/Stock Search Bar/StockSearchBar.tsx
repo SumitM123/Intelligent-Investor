@@ -9,6 +9,11 @@ type StockMatch = {
     currency: string;
 };
 
+type AlphaVantageMatch = {
+    "1. symbol": string;
+    "2. name": string;
+    "8. currency": string;
+}
 function StockSearchBar() {
     const [stocks, setStocks] = useState<StockMatch[]>([]);
     const [searchItem, setSearchItem] = useState("");
@@ -26,19 +31,28 @@ function StockSearchBar() {
                 setStocks([]);
                 return;
             }
-
-            const sizeMin = Math.min(arrJSON["bestMatches"].length, 5);
+            
+            const americanStocks: AlphaVantageMatch[] = [];
+            for(let i = 0; i < arrJSON["bestMatches"].length; i++) {
+                const currentObject = arrJSON["bestMatches"][i] as AlphaVantageMatch;
+                if (currentObject["8. currency"] === "USD") {
+                    americanStocks.push(currentObject);
+                }
+                if (americanStocks.length >= 5) {
+                    break;
+                }
+            }
+            //const sizeMin = Math.min(arrJSON["bestMatches"].length, 5);
             const nextStocks: StockMatch[] = [];
 
-            for (let i = 0; i < sizeMin; i++) {
-                const currentObject = arrJSON["bestMatches"][i];
+            for (let i = 0; i < americanStocks.length; i++) {
+                const currentObject = americanStocks[i];
                 nextStocks.push({
                     symbol: currentObject["1. symbol"],
                     name: currentObject["2. name"],
                     currency: currentObject["8. currency"],
                 });
             }
-
             setStocks(nextStocks);
         } catch (error) {
             console.error((error as Error).message);
