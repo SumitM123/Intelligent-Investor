@@ -14,6 +14,12 @@ type AlphaVantageMatch = {
     "2. name": string;
     "8. currency": string;
 }
+/*
+    Within the list, if clicked, it'll go to an alternative page for that specific stock, and essentially provide 
+    what's needed in terms of the ratios and other essential metrics. It has one button inside, which is add to 
+    include in the watchlist. Then, it'll start cumulating up the dividends. 
+*/
+
 function StockSearchBar() {
     const [stocks, setStocks] = useState<StockMatch[]>([]);
     const [searchItem, setSearchItem] = useState("");
@@ -69,7 +75,7 @@ function StockSearchBar() {
         }
 
         const timer = setTimeout(() => {
-            const url = `https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords=${encodeURIComponent(trimmedSearch)}&apikey=${process.env.NEXT_PUBLIC_ALPHA_VANTAGE_API}&datatype=json`;
+            const url = `https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords=${encodeURIComponent(trimmedSearch)}&apikey=${process.env.ALPHA_VANTAGE_API}&datatype=json`;
             getStocks(url);
         }, 500);
 
