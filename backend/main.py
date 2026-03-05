@@ -8,7 +8,7 @@ import os
 from database import SessionLocal
 from routes.user import router as router_user 
 from routes.stocks import router as router_stocks
-
+from routes.snapTrade import router as router_snapTrade
 app = FastAPI(title="Intelligent Investor", version="1.0.0", )
 
 # Add CORS middleware to allow frontend to communicate with backend
@@ -21,6 +21,7 @@ app.add_middleware(
 )
 app.include_router(router_user)
 app.include_router(router_stocks)
+app.include_router(router_snapTrade)
 # DATABASE_URL = os.getenv("DATABASE_URL")
 # POSTGRE_USER = os.getenv("POSTGRE_USER")
 # POSTGRE_PASSWORD = os.getenv("POSTGRE_PASSWORD")
