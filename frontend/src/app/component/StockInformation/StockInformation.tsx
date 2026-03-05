@@ -18,7 +18,7 @@ function StockInformation(name : string) {
             const incomeStatement = await fetch(incomeStatementURL);
             const incomeStatementJSON = await incomeStatement.json();
             const incomeStatementJSONQuarterly = incomeStatementJSON["quarterlyReports"];
-        
+            
         } catch (error) {
             console.error("Problem receiving the income statement of the stock" + (error as Error).message);
         }
