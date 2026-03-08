@@ -1,6 +1,8 @@
 # from fastapi import BaseModel
-# from database import SessionLocal
-# from fastapi import FastAPI, Response, status
+from database import SessionLocal
+from fastapi import FastAPI, Response, status, HTTPException
+from sqlalchemy import text
+from uuid import UUID
 
 # class User(BaseModel):
 #     google_id: str = None
@@ -51,3 +53,27 @@
 #             session.rollback()
 #             user_id = None
 #     return user_id
+def getSnapTradeSecretID(user_id: UUID, snapTrade_id: str):
+    with SessionLocal() as session:
+        # maybe just change it such that you're only looking up the row based on snapTrade_id instead of both
+        row = session.execute(
+            text(
+                """
+                SELECT snaptrade_usersecret_id
+                FROM public.snaptrade_id
+                WHERE user_id = :user_id
+                  AND snaptrade_id = :snaptrade_id
+                LIMIT 1
+                """
+            ),
+            {
+                "user_id": user_id,
+                "snaptrade_id": snapTrade_id,
+            },
+        ).first()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="No matching SnapTrade credentials found")
+    
+    snaptrade_usersecret_id = row[0]
+    return snaptrade_usersecret_id

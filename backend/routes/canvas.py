@@ -28,8 +28,8 @@ async def verify(request: Necessities, response: Response):
     
     # what else do you have to check
 
-@router.post("/scrapeAssignments")
-async def scrapeAssignments(request, response: Response):
+# @router.post("/scrapeAssignments")
+# async def scrapeAssignments(request, response: Response):
     
     
 
