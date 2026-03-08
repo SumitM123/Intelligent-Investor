@@ -42,7 +42,7 @@ def get_user_id(google_id: str | None, response: Response):
 
     user_id = row[0]
     response.set_cookie(key="user_id", value=str(user_id), max_age=300000, path="/api", httponly=True)
-
+    
     with SessionLocal() as session:
         info = session.execute(
             text("SELECT name, email FROM user_info WHERE user_id = :user_id"),
