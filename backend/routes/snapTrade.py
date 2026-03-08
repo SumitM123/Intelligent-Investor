@@ -13,7 +13,7 @@ from sqlalchemy import text
 router = APIRouter(prefix="/api/snapTrade")
 
 @router.post("/addUser")
-def addUser(response: Response, user_id: Annotated[UUID, Cookie()]):
+def addUser(user_id: Annotated[UUID, Cookie()]):
     snaptrade_id = None
     user_secret = None
     # adding snaptrade_id and user_secret to database
@@ -63,14 +63,8 @@ def addUser(response: Response, user_id: Annotated[UUID, Cookie()]):
             session.rollback()
             raise
 
-    # Store the SnapTrade user id in a cookie for subsequent backend calls.
-    response.set_cookie(
-        key="snaptrade_user_id",
-        value=str(snaptrade_id),
-        httponly=True,
-        samesite="lax",
-    )
-
-     
-    # the userID and user_secret need to passed for API calls for snapTrade. Maybe add it to the cookies.
+    return {
+        "user_id": str(user_id),
+        "snaptrade_id": str(snaptrade_id),
+    }
     

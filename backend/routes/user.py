@@ -1,7 +1,6 @@
 from pydantic import BaseModel
 from database import SessionLocal
-from fastapi import FastAPI, Response, status, File, UploadFile, Form
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, status, File, UploadFile, Form
 from fastapi import APIRouter, Cookie
 from fastapi import HTTPException
 from fastapi import Body
@@ -28,7 +27,7 @@ router = APIRouter(prefix="/api/users")
     Based on the google_id, it'll get the respective UUID and assign the UUID as a cookie 
 '''
 @router.get("/getUserID")
-def get_user_id(google_id: str | None, response: Response):
+def get_user_id(google_id: str | None):
     if not google_id:
         raise HTTPException(status_code=400, detail="Missing google_id")
 
@@ -41,7 +40,6 @@ def get_user_id(google_id: str | None, response: Response):
         raise HTTPException(status_code=400, detail="Invalid request. User doesn't exist")
 
     user_id = row[0]
-    response.set_cookie(key="user_id", value=str(user_id), max_age=300000, path="/api", httponly=True)
     
     with SessionLocal() as session:
         info = session.execute(
@@ -69,7 +67,7 @@ def get_user_id(google_id: str | None, response: Response):
 #     #     ExpiresIn=3600  
 #     # )
     name, email = info
-    return {"content": {"user_name": name, "email": email}, "message": "Successful request"}
+    return {"content": {"user_name": name, "email": email}, "user_id": str(user_id), "message": "Successful request"}
 
 
 
@@ -86,7 +84,6 @@ def add_user_id(
     user_email: Annotated[str, Form()],
     user_name: Annotated[str, Form()],
     google_id: Annotated[str, Form()],
-    response: Response,
 ):
     if not google_id:
         raise HTTPException(status_code=400, detail="Missing google_id")
@@ -109,8 +106,7 @@ def add_user_id(
                     {"user_id": existing_id, "name": user_name, "email": user_email},
                 )
                 session.commit()
-            response.set_cookie(key="user_id", value=existing_id, max_age=300000, path="/api", httponly=True)
-            return JSONResponse(content="User already exists", status_code=200)
+            return {"message": "User already exists", "user_id": str(existing_id)}
 
         # create user and info in one transaction
         session.execute(text("INSERT INTO users_id (google_id) VALUES (:google_id)"), {"google_id": google_id})
@@ -124,8 +120,6 @@ def add_user_id(
             {"user_id": user_id, "name": user_name, "email": user_email},
         )
         session.commit()
-
-    response.set_cookie(key="user_id", value=user_id, max_age=300000, path="/api", httponly=True)
 
     #     # add information to the user_info table
 #     # profile_picture_key = nanoid.generate()
@@ -166,7 +160,7 @@ def add_user_id(
 #     #     obj.upload_file(profile_picture_key)
 #     # except Exception:
 #     #     raise HTTPException(status_code=400, detail="Had trouble uploading profile picture to s3 bucket")
-    return {"message": "Successful"}
+    return {"message": "Successful", "user_id": str(user_id)}
 
 
 
