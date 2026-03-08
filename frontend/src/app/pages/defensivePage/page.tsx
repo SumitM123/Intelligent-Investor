@@ -30,7 +30,6 @@ function DefensivePage () {
     //     })
     //     const bondsArr = axios.get('/api/stocks/getBonds')
     // }, []);
-
     return (
         <div>
             <h1>
