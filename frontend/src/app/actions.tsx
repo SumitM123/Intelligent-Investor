@@ -5,16 +5,6 @@ import { cookies } from 'next/headers'
 export async function passSignInProps(formData: FormData) {
 
     // Form data consists of name, googleID, email, and profilePictureURL
-    const userGoogleID = formData.get("googleID");
-    interface RequestInterface {
-        googleID: FormDataEntryValue
-    }
-
-    const getRequestParams : RequestInterface = {
-        googleID: userGoogleID?.toString() || ''
-    };
-
-
     const jsonFormData = {
         "user_name": formData.get("Name"),
         "google_id": formData.get("googleID"),
@@ -30,10 +20,26 @@ export async function passSignInProps(formData: FormData) {
     addUserForm.append("user_name", userName);
     addUserForm.append("user_email", userEmail);
     addUserForm.append("google_id", googleID);
-    await fetch("http://backend:8000/api/users/addUser", {
+    const googleAddUser = await fetch("http://backend:8000/api/users/addUser", {
         method: "POST",
         body: addUserForm
     });
+    if (!googleAddUser.ok) {
+        throw new Error("Unable to add user");
+    }
+
+    const addUserData = await googleAddUser.json();
+    const userId = addUserData?.user_id as string | undefined;
+
+    if (userId) {
+        await fetch("http://backend:8000/api/snapTrade/addUser", {
+            method: "POST",
+            headers: {
+                // This is only for one request call
+                Cookie: `user_id=${userId}`,
+            },
+        });
+    }
     // Everything till here is good
 
     // NOT NEED THIS BECAUSE BACKEND ALREADY RAISES HTTPEXCEPTION
@@ -47,6 +53,9 @@ export async function passSignInProps(formData: FormData) {
     //Setting the cookies values so that it can be read by signIn component
     (await cookieStore).set('userName', userName);
     (await cookieStore).set('profilePictureURL', profilePictureURL);
+    if (userId) {
+        (await cookieStore).set('user_id', userId);
+    }
 
     // const url = new URL("http://backend:8000/api/users/getUserID/");
     // // Ensure the value is a string (use empty string if null/File)
