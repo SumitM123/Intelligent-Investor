@@ -19,4 +19,7 @@ def addUser(user_id: Annotated[UUID, Cookie()]):
     
     # based on the type of the user, change the schema of the snaptrade_id table for the specific column
     print(type(user_secret))
-    # add the values to the snaptrade_id table
+    # add the values to the snaptrade_id table in side the database. Use sessionLocal to do so
+ 
+    
+    # the userID and user_secret need to passed for API calls. Maybe add it to the cookies
