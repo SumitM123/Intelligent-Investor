@@ -67,5 +67,4 @@ export async function passSignInProps(formData: FormData) {
     revalidatePath("/");
     // (await cookieStore).delete("userName");
     // (await cookieStore).delete("profilePictureURL");
-
 }
