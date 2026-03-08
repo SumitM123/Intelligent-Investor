@@ -1,5 +1,6 @@
 from snapTradeInitialization import snapTrade
 from fastapi import APIRouter
+from fastapi import HTTPException
 from fastapi import Request
 from pydantic import BaseModel
 from fastapi import Response, status
@@ -9,6 +10,8 @@ from fastapi import Cookie
 from typing import Annotated
 from database import SessionLocal
 from sqlalchemy import text
+from frequenty_used_methods import getSnapTradeSecretID
+import httpx
 
 router = APIRouter(prefix="/api/snapTrade")
 
@@ -68,3 +71,16 @@ def addUser(user_id: Annotated[UUID, Cookie()]):
         "snaptrade_id": str(snaptrade_id),
     }
     
+@router.get("/generateConnectionPortal")
+def generateConnectionPortal(user_id: Annotated[UUID, Cookie()], snapTrade_id: Annotated[str, Cookie()]):
+
+    snaptrade_usersecret_id = getSnapTradeSecretID(user_id, snapTrade_id)
+
+    generateConnectionURLRequest = httpx.post("https://api.snaptrade.com/api/v1/snapTrade/login", user_id=str(user_id), user_secret=str(snaptrade_usersecret_id))
+    
+    connectionURLJSON = generateConnectionURLRequest.json()
+
+    urlToClient = connectionURLJSON.body["redirectURI"]
+    return {
+        "redirectURI": urlToClient
+    }
