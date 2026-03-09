@@ -1,8 +1,7 @@
-"use client"
-import React, { useEffect } from "react";
-import {useState} from 'react';
-import axios from 'axios';
+import React from "react";
 import StockSearchBar from "@/app/component/Stock Search Bar/StockSearchBar";
+import ConnectionURL from "@/app/component/ConnectionURL/connectionURL";
+import { useUserContext } from "@/app/context/UserContext";
 // import {UserContext, useUserContext} from '../../Contexts/UserContext'
 function DefensivePage () {
     
@@ -36,6 +35,7 @@ function DefensivePage () {
                 Defensive Page
             </h1>
             <StockSearchBar />
+            <ConnectionURL prevPageURL="defensive"/>
         </div>
 
     );

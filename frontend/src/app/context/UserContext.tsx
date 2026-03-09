@@ -4,6 +4,8 @@ import { useState, useContext, createContext, Dispatch, SetStateAction, ReactNod
 interface UserContextValue {
     userID: string;
     setUserID: Dispatch<SetStateAction<string>>;
+    isSignedIn: boolean;
+    setIsSignedIn: Dispatch<SetStateAction<boolean>>;
 }
 export const UserContext = createContext<UserContextValue | null>(null);
 export function useUserContext () {
@@ -15,8 +17,8 @@ export function useUserContext () {
 }
 export function UserContextProvider({ children } : {children: ReactNode}) {
     const [userID, setUserID] = useState("No value");
-
-    const value = { userID, setUserID };
+    const [isSignedIn, setIsSignedIn] = useState(false);
+    const value = { userID, setUserID, isSignedIn, setIsSignedIn };
     
     return (
         <UserContext.Provider value={value}> 

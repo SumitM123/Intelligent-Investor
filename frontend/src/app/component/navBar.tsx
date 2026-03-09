@@ -3,6 +3,7 @@ import React from "react";
 import { useState } from "react";
 import Link from "next/link";
 import SignIn from "./SignIn/signIn";
+import { useUserContext } from "../context/UserContext";
 interface NavBarProperties {
     signedIn: boolean;
 }
@@ -26,6 +27,8 @@ interface SignedIn {
 }
 
 export default function NavBar({isSignedIn, userName, profilePicture} : SignedIn) {
+    const userContext = useUserContext();
+    userContext.setIsSignedIn(isSignedIn);
     return (
         <div>   
                 <Link href={"/"}> 
