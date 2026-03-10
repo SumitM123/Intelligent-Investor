@@ -1,5 +1,6 @@
+"use client"
 import React from "react";
-import { useUserContext} from "../context/UserContext";
+import { useUserContext} from "../../context/UserContext";
 import { useState } from "react";
 import { SnapTradeReact } from 'snaptrade-react';
 
@@ -18,6 +19,10 @@ function URIButton( {uriGenerated} : uri) {
         cursor: isSignedIn ? "pointer" : "not-allowed",
         opacity: isSignedIn ? 1 : 0.8,
     };
+    function onClose() {
+        setOpen(false);
+        router
+    }
     return (
         <div>
             <button type="button" disabled={!isSignedIn} style={buttonStyle} onClick={() => {
@@ -28,7 +33,11 @@ function URIButton( {uriGenerated} : uri) {
           <SnapTradeReact
         loginLink={uriGenerated}
         isOpen={open}
-        close={() => setOpen(false)}
+        close={() => 
+            setOpen(false)
+            
+        } // After setOpen(), you can route to a different page for accounts
+        
       />
         </div>
     );

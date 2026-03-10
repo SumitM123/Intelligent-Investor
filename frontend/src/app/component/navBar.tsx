@@ -1,6 +1,7 @@
 'use client'
 import React from "react";
 import { useState } from "react";
+import { useEffect } from "react";
 import Link from "next/link";
 import SignIn from "./SignIn/signIn";
 import { useUserContext } from "../context/UserContext";
@@ -28,7 +29,11 @@ interface SignedIn {
 
 export default function NavBar({isSignedIn, userName, profilePicture} : SignedIn) {
     const userContext = useUserContext();
-    userContext.setIsSignedIn(isSignedIn);
+
+    useEffect(() => {
+        userContext.setIsSignedIn(isSignedIn);
+    }, [isSignedIn, userContext]);
+
     return (
         <div>   
                 <Link href={"/"}> 
