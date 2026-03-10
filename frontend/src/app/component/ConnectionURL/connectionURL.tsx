@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { useState } from "react";
 import URIButton from "@/app/component/URIButton/uriButton";
+import { usePrevPageContext } from "@/app/context/prevPageURL";
 // import { useUserContext } from "@/app/context/UserContext";
 // The prevPageURl is the URL to go back to once it's been finished
 interface ConnectionURLProps {
@@ -12,6 +13,7 @@ interface ConnectionURLProps {
 
 function ConnectionURL({ prevPageURL }: ConnectionURLProps) {
     const [uriGenerated, setURIGenerated] = useState<string>("");
+    
     async function generateURI() {
         var data;
         try {
@@ -36,7 +38,7 @@ function ConnectionURL({ prevPageURL }: ConnectionURLProps) {
     }, []);
     return (
         <div>
-            <URIButton uriGenerated={uriGenerated}/>
+            <URIButton uriGenerated={uriGenerated} prevPageURLNav={prevPageURL}/>
         </div>
     );
 };

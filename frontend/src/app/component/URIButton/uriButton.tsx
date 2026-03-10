@@ -3,13 +3,18 @@ import React from "react";
 import { useUserContext} from "../../context/UserContext";
 import { useState } from "react";
 import { SnapTradeReact } from 'snaptrade-react';
-
+import { usePrevPageContext } from "@/app/context/prevPageURL";
+import { useRouter } from "next/router";
 interface uri {
-    uriGenerated : string
+    uriGenerated : string,
+    prevPageURLNav: string
 }
-function URIButton( {uriGenerated} : uri) {
+function URIButton( {uriGenerated, prevPageURLNav} : uri) {
     const [open, setOpen] = useState(false);
     const { isSignedIn } = useUserContext();
+    const {setPrevPage} = usePrevPageContext();
+    const router = useRouter();
+    setPrevPage(prevPageURLNav);
     const buttonStyle: React.CSSProperties = {
         padding: "10px 16px",
         borderRadius: "8px",
@@ -21,7 +26,7 @@ function URIButton( {uriGenerated} : uri) {
     };
     function onClose() {
         setOpen(false);
-        router
+        router.push("/pages/defensivePage/accountsChoosing");
     }
     return (
         <div>
@@ -33,10 +38,7 @@ function URIButton( {uriGenerated} : uri) {
           <SnapTradeReact
         loginLink={uriGenerated}
         isOpen={open}
-        close={() => 
-            setOpen(false)
-            
-        } // After setOpen(), you can route to a different page for accounts
+        close={onClose} // After setOpen(), you can route to a different page for accounts
         
       />
         </div>
