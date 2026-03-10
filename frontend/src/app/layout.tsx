@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import { cookies } from "next/headers";
 import "./globals.css";
+import Providers from "./providers";
 import IntelligentInvestor from './component/Intelligent Investor Button/intelligentInvestor'
 import NavBar from "./component/navBar";
 import SignIn from "./component/SignIn/signIn"
@@ -47,7 +48,8 @@ export default async function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-              <div>
+        <Providers>
+          <div>
         {/* Inside this Div will be the navbar.
         Inside the navbar, there will be two buttons: Intelligent Investor Analyzer, Sign In
         Intelligent Investor:
@@ -65,8 +67,9 @@ export default async function RootLayout({
             <SignInServer/>
           </Suspense>
           
-      </div>
-        {children}
+          </div>
+          {children}
+        </Providers>
       </body>
     </html>
   );

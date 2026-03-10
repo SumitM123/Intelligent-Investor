@@ -1,6 +1,6 @@
 import React, { useEffect } from "react";
 import { useState } from "react";
-import URIButton from "@/app/URIButton/uriButton";
+import URIButton from "@/app/component/URIButton/uriButton";
 // import { useUserContext } from "@/app/context/UserContext";
 // The prevPageURl is the URL to go back to once it's been finished
 interface ConnectionURLProps {
