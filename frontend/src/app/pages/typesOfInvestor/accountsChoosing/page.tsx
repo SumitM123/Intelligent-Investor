@@ -44,6 +44,10 @@ function listAllAccounts() {
                 const fetchedAccounts = (resJSON["accounts_connection"] ?? []) as BrokerageAccount[];
                 setAllAccounts(fetchedAccounts);
 
+                if (fetchedAccounts.length === 0) {
+                    setError("There are no USD accounts for this specific connection to the brokerage. Please select another brokerage to connect with.");
+                }
+
                 if (fetchedAccounts.length > 0) {
                     setSelectedAccountId(fetchedAccounts[0].id);
                 }
@@ -73,16 +77,21 @@ function listAllAccounts() {
             )}
 
             {!isLoading && !error && allAccounts.length > 0 && (
-                <select
-                    value={selectedAccountId}
-                    onChange={(event) => setSelectedAccountId(event.target.value)}
-                >
-                    {allAccounts.map((account) => (
-                        <option key={account.id} value={account.id}>
-                            {account.name}
-                        </option>
-                    ))}
-                </select>
+                <>
+                    <select
+                        value={selectedAccountId}
+                        onChange={(event) => setSelectedAccountId(event.target.value)}
+                    >
+                        {allAccounts.map((account) => (
+                            <option key={account.id} value={account.id}>
+                                {account.name}
+                            </option>
+                        ))}
+                    </select>
+                    <button type="button" onClick={() => {
+                        
+                    }}>Select</button>
+                </>
             )}
         </div>
     );
