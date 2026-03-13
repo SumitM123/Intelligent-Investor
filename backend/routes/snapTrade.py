@@ -86,8 +86,12 @@ def generateConnectionPortal(user_id: Annotated[UUID, Cookie()], snapTrade_id: A
     }
 
 @router.get("/getAllAccountsFromConnection")
-def getAllAccountsFromConnection(snapTrade_id: Annotated[str, Cookie()]):
+def getAllAccountsFromConnection(snapTrade_id: Annotated[str, Cookie()], connection_id: str):
     snaptrade_usersecret_id = getSnapTradeSecretID(snapTrade_id)
-
-    allAccountsFromAllConnection =  snaptrade.accountInformation.listUserAccounts(
-        
+    allAccountsFromAllConnection = snapTrade.account_information.list_user_accounts(user_id=snapTrade_id, user_secret=snaptrade_usersecret_id)
+    # get's all the valid accounts of the USD currency and within the right connection
+    accountsForConnection = []
+    for brokerageAccount in allAccountsFromAllConnection:
+        if brokerageAccount["brokerage_authorization"] == connection_id and brokerageAccount["balance"]["total"]["currency"] == "USD":
+            accountsForConnection.append[brokerageAccount]
+    return accountsForConnection
