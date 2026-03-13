@@ -6,11 +6,27 @@
 "use client"
 import { usePrevPageContext } from "@/app/context/prevPageURL";
 import { useEffect, useState } from "react";
+
+interface BrokerageAccount {
+    id: string;
+    name: string;
+}
+
 function listAllAccounts() {
-    const [allAccounts, setAllAccounts] = useState([]);
+    const [allAccounts, setAllAccounts] = useState<BrokerageAccount[]>([]);
+    const [selectedAccountId, setSelectedAccountId] = useState<string>("");
+    const [isLoading, setIsLoading] = useState<boolean>(true);
+    const [error, setError] = useState<string>("");
     //contains the prevPageURL and the connectionID
     const accountListingContext = usePrevPageContext();
+
     useEffect(() => {
+        if (!accountListingContext.connectionID || accountListingContext.connectionID === "No value") {
+            setError("Connection ID is missing. Please connect a brokerage account first.");
+            setIsLoading(false);
+            return;
+        }
+
         // Get all the accounts from all the connections
         const gettingRelevantAccounts = async () => {
             try {
@@ -19,14 +35,57 @@ function listAllAccounts() {
                 const response = await fetch(`http://backend:8000/api/snapTrade/getAllAccountsFromConnection?${params}`, {
                     credentials: "include"
                 });  
+
+                if (!response.ok) {
+                    throw new Error(`Request failed with status ${response.status}`);
+                }
+
                 const resJSON = await response.json();
-                setAllAccounts(resJSON);
+                const fetchedAccounts = (resJSON["accounts_connection"] ?? []) as BrokerageAccount[];
+                setAllAccounts(fetchedAccounts);
+
+                if (fetchedAccounts.length > 0) {
+                    setSelectedAccountId(fetchedAccounts[0].id);
+                }
             } catch (err) {
-                console.error("Error getting the accounts to the relevant connection" + (err as Error).message)
+                const message = (err as Error).message;
+                setError("Error getting the accounts for the selected connection.");
+                console.error("Error getting the accounts to the relevant connection: " + message)
+            } finally {
+                setIsLoading(false);
             }
         }
+
         void gettingRelevantAccounts();
 
-    }, []);
+    }, [accountListingContext.connectionID]);
+
+    return (
+        <div>
+            <h2>Select an account to connect</h2>
+
+            {isLoading && <p>Loading accounts...</p>}
+
+            {!isLoading && error && <p>{error}</p>}
+
+            {!isLoading && !error && allAccounts.length === 0 && (
+                <p>No accounts were found for this connection.</p>
+            )}
+
+            {!isLoading && !error && allAccounts.length > 0 && (
+                <select
+                    value={selectedAccountId}
+                    onChange={(event) => setSelectedAccountId(event.target.value)}
+                >
+                    {allAccounts.map((account) => (
+                        <option key={account.id} value={account.id}>
+                            {account.name}
+                        </option>
+                    ))}
+                </select>
+            )}
+        </div>
+    );
+
 }
 export default listAllAccounts;
