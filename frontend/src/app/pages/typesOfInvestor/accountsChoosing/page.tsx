@@ -26,7 +26,18 @@ function listAllAccounts() {
             setIsLoading(false);
             return;
         }
-
+        const receivedAccountInformation = async () => {
+            try {
+                const params = new URLSearchParams();
+                params.append("account_id", selectedAccountId);
+                const res = await fetch(`http://backend:8000/api/snapTrade/accountInformation?${params}`);
+                
+            } catch (err) {
+                const message = (err as Error).message;
+                setError("Error getting account information.");
+                console.error("Error getting account information." + message)
+            } 
+        }
         // Get all the accounts from all the connections
         const gettingRelevantAccounts = async () => {
             try {
@@ -89,7 +100,7 @@ function listAllAccounts() {
                         ))}
                     </select>
                     <button type="button" onClick={() => {
-                        
+
                     }}>Select</button>
                 </>
             )}
