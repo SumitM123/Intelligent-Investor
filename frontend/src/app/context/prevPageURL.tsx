@@ -4,6 +4,8 @@ import { useState, useContext, createContext, Dispatch, SetStateAction, ReactNod
 interface prevPageContext {
     prevPageURL: string;
     setPrevPage: Dispatch<SetStateAction<string>>;
+    connectionID: string;
+    setConnectionID: Dispatch<SetStateAction<string>>;
 }
 export const prevPageContext = createContext<prevPageContext | null>(null);
 export function usePrevPageContext () {
@@ -15,7 +17,8 @@ export function usePrevPageContext () {
 }
 export function PrevPageContextProvider({ children } : {children: ReactNode}) {
     const [prevPage, setPrevPage] = useState("No value");
-    const value = { prevPageURL: prevPage, setPrevPage};
+    const [connectionID, setConnectionID] = useState("No value");
+    const value = { prevPageURL: prevPage, setPrevPage, connectionID: connectionID, setConnectionID};
     
     return (
         <prevPageContext.Provider value={value}> 

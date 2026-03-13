@@ -31,15 +31,21 @@ export async function passSignInProps(formData: FormData) {
     const addUserData = await googleAddUser.json();
     const userId = addUserData?.user_id as string | undefined;
 
+    var snapTradeID;
     if (userId) {
-        await fetch("http://backend:8000/api/snapTrade/addUser", {
-            method: "POST",
-            headers: {
-                // This is only for one request call
-                Cookie: `user_id=${userId}`,
-            },
-        });
+        try {
+            snapTradeID = await fetch("http://backend:8000/api/snapTrade/addUser", {
+                method: "POST",
+                headers: {
+                    // This is only for one request call
+                    Cookie: `user_id=${userId}`,
+                },
+            });
+        } catch (err) {
+            console.error("Unable to make request to add SnapTrade user" + (err as Error).message);
+        }
     }
+    let snapTradeJSON = await snapTradeID?.json();
     // Everything till here is good
 
     // NOT NEED THIS BECAUSE BACKEND ALREADY RAISES HTTPEXCEPTION
@@ -56,7 +62,9 @@ export async function passSignInProps(formData: FormData) {
     if (userId) {
         (await cookieStore).set('user_id', userId);
     }
-
+    if (snapTradeJSON?.snaptrade_id) {
+        (await cookieStore).set('snapTradeUserID', snapTradeJSON.snaptrade_id);
+    } 
     // const url = new URL("http://backend:8000/api/users/getUserID/");
     // // Ensure the value is a string (use empty string if null/File)
     // url.searchParams.set("google_id", googleID);
