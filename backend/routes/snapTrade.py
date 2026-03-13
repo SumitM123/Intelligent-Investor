@@ -94,4 +94,4 @@ def getAllAccountsFromConnection(snapTrade_id: Annotated[str, Cookie()], connect
     for brokerageAccount in allAccountsFromAllConnection:
         if brokerageAccount["brokerage_authorization"] == connection_id and brokerageAccount["balance"]["total"]["currency"] == "USD":
             accountsForConnection.append[brokerageAccount]
-    return accountsForConnection
+    return {"accounts_connection" : accountsForConnection}

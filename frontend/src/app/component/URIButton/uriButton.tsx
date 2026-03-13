@@ -42,7 +42,7 @@ function URIButton( {uriGenerated, prevPageURLNav} : uri) {
         close={onClose} // After setOpen(), you can route to a different page for accounts
         onSuccess={ (authorizationID) => {
                 setConnectionID(authorizationID);
-                router.push("/pages/defensivePage/accountChoosing");
+                router.push("/pages/typesOfInvestor/accountChoosing");
             }
         }
         onError={
