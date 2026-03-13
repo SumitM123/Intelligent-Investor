@@ -12,7 +12,7 @@ interface uri {
 function URIButton( {uriGenerated, prevPageURLNav} : uri) {
     const [open, setOpen] = useState(false);
     const { isSignedIn } = useUserContext();
-    const {setPrevPage} = usePrevPageContext();
+    const {setPrevPage, setConnectionID} = usePrevPageContext();
     const router = useRouter();
     setPrevPage(prevPageURLNav);
     const buttonStyle: React.CSSProperties = {
@@ -28,6 +28,7 @@ function URIButton( {uriGenerated, prevPageURLNav} : uri) {
         setOpen(false);
         router.push("/pages/defensivePage/accountsChoosing");
     }
+
     return (
         <div>
             <button type="button" disabled={!isSignedIn} style={buttonStyle} onClick={() => {
@@ -39,7 +40,16 @@ function URIButton( {uriGenerated, prevPageURLNav} : uri) {
         loginLink={uriGenerated}
         isOpen={open}
         close={onClose} // After setOpen(), you can route to a different page for accounts
-        
+        onSuccess={ (authorizationID) => {
+                setConnectionID(authorizationID);
+                router.push("/pages/defensivePage/accountChoosing");
+            }
+        }
+        onError={
+            (error) => {
+                console.error("Trouble connection to brokerage account: " + error.detail);
+            }
+        }
       />
         </div>
     );

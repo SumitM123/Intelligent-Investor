@@ -53,7 +53,7 @@ from uuid import UUID
 #             session.rollback()
 #             user_id = None
 #     return user_id
-def getSnapTradeSecretID(user_id: UUID, snapTrade_id: str):
+def getSnapTradeSecretID(snapTrade_id: str):
     with SessionLocal() as session:
         # maybe just change it such that you're only looking up the row based on snapTrade_id instead of both
         row = session.execute(
@@ -61,13 +61,11 @@ def getSnapTradeSecretID(user_id: UUID, snapTrade_id: str):
                 """
                 SELECT snaptrade_usersecret_id
                 FROM public.snaptrade_id
-                WHERE user_id = :user_id
-                  AND snaptrade_id = :snaptrade_id
+                WHERE snaptrade_id = :snaptrade_id
                 LIMIT 1
                 """
             ),
             {
-                "user_id": user_id,
                 "snaptrade_id": snapTrade_id,
             },
         ).first()

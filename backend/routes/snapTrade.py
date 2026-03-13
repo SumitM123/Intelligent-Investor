@@ -84,3 +84,10 @@ def generateConnectionPortal(user_id: Annotated[UUID, Cookie()], snapTrade_id: A
     return {
         "redirectURI": urlToClient
     }
+
+@router.get("/getAllAccountsFromConnection")
+def getAllAccountsFromConnection(snapTrade_id: Annotated[str, Cookie()]):
+    snaptrade_usersecret_id = getSnapTradeSecretID(snapTrade_id)
+
+    allAccountsFromAllConnection =  snaptrade.accountInformation.listUserAccounts(
+        
