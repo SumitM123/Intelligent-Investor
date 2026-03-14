@@ -4,7 +4,7 @@ import { useUserContext} from "../../context/UserContext";
 import { useState } from "react";
 import { SnapTradeReact } from 'snaptrade-react';
 import { usePrevPageContext } from "@/app/context/prevPageURL";
-import { useRouter } from "next/router";
+import { useRouter } from "next/navigation";
 interface uri {
     uriGenerated : string,
     prevPageURLNav: string
@@ -26,7 +26,7 @@ function URIButton( {uriGenerated, prevPageURLNav} : uri) {
     };
     function onClose() {
         setOpen(false);
-        router.push("/pages/defensivePage/accountsChoosing");
+        router.push("/pages/typesOfInvestor/defensivePage/accountsChoosing");
     }
 
     return (

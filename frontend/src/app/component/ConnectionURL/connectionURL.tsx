@@ -1,3 +1,4 @@
+"use client"
 import React, { useEffect } from "react";
 import { useState } from "react";
 import URIButton from "@/app/component/URIButton/uriButton";
