@@ -74,21 +74,30 @@ def addUser(user_id: Annotated[UUID, Cookie()]):
     }
     
 @router.get("/generateConnectionPortal")
-def generateConnectionPortal(user_id: Annotated[UUID, Cookie()], snapTrade_id: Annotated[str, Cookie()]):
+def generateConnectionPortal(
+    user_id: Annotated[UUID, Cookie()],
+    snapTrade_id: Annotated[str, Cookie(alias="snapTradeUserID")],
+):
 
-    snaptrade_usersecret_id = getSnapTradeSecretID(user_id, snapTrade_id)
+    snaptrade_usersecret_id = getSnapTradeSecretID(snapTrade_id)
 
-    generateConnectionURLRequest = httpx.post("https://api.snaptrade.com/api/v1/snapTrade/login", user_id=str(user_id), user_secret=str(snaptrade_usersecret_id))
+    generateConnectionURLRequest = httpx.post(
+        "https://api.snaptrade.com/api/v1/snapTrade/login",
+        json={"userId": str(snapTrade_id), "userSecret": str(snaptrade_usersecret_id)},
+    )
     
     connectionURLJSON = generateConnectionURLRequest.json()
 
-    urlToClient = connectionURLJSON.body["redirectURI"]
+    urlToClient = connectionURLJSON["redirectURI"]
     return {
         "redirectURI": urlToClient
     }
 
 @router.get("/getAllAccountsFromConnection")
-def getAllAccountsFromConnection(snapTrade_id: Annotated[str, Cookie()], connection_id: str):
+def getAllAccountsFromConnection(
+    snapTrade_id: Annotated[str, Cookie(alias="snapTradeUserID")],
+    connection_id: str,
+):
     snaptrade_usersecret_id = getSnapTradeSecretID(snapTrade_id)
     allAccountsFromAllConnection = snapTrade.account_information.list_user_accounts(user_id=snapTrade_id, user_secret=snaptrade_usersecret_id).body
     # get's all the valid accounts of the USD currency and within the right connection
@@ -99,7 +108,10 @@ def getAllAccountsFromConnection(snapTrade_id: Annotated[str, Cookie()], connect
     return {"accounts_connection" : accountsForConnection}
 
 @router.get("/accountInformation")
-def getAccountInformation(snapTrade_id: Annotated[str, Cookie()], account_id: str):
+def getAccountInformation(
+    snapTrade_id: Annotated[str, Cookie(alias="snapTradeUserID")],
+    account_id: str,
+):
     snaptrade_usersecret_id = getSnapTradeSecretID(snapTrade_id)
     # may have to change the method name
     account_information = snapTrade.account_information.get_user_account_details(

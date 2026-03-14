@@ -16,9 +16,10 @@ function ConnectionURL({ prevPageURL }: ConnectionURLProps) {
     const [uriGenerated, setURIGenerated] = useState<string>("");
     
     async function generateURI() {
-        var data;
+        let data: { redirectURI?: string } | null = null;
         try {
-            const res = await fetch("http://backend:8000/api/snapTrade/generateConnectionPortal", {
+            const apiBase = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
+            const res = await fetch(`${apiBase}/api/snapTrade/generateConnectionPortal`, {
                 method: "GET",
                 credentials: "include", // needed if backend reads cookies
             });
@@ -28,7 +29,7 @@ function ConnectionURL({ prevPageURL }: ConnectionURLProps) {
             } catch (e) {
                 console.error("Error generating the URI" + (e as Error).message);
             } 
-        return data.body["redirectURI"];
+        return data?.redirectURI ?? "";
     }
     useEffect(() => {
         const loadURI = async () => {
@@ -39,7 +40,8 @@ function ConnectionURL({ prevPageURL }: ConnectionURLProps) {
     }, []);
     return (
         <div>
-            <URIButton uriGenerated={uriGenerated} prevPageURLNav={prevPageURL}/>
+            {uriGenerated !== "" && <URIButton uriGenerated={uriGenerated} prevPageURLNav={prevPageURL}/>}
+            {uriGenerated === "" && <a> Receiving the URI to connect brokerage </a>}
         </div>
     );
 };
