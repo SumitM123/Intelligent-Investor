@@ -27,7 +27,7 @@ def addUser(user_id: Annotated[UUID, Cookie()]):
                 text(
                     """
                     SELECT snaptrade_id, snaptrade_usersecret_id
-                    FROM public.snaptrade_id
+                    FROM snaptrade_id
                     WHERE user_id = :user_id
                     LIMIT 1
                     """
@@ -35,10 +35,12 @@ def addUser(user_id: Annotated[UUID, Cookie()]):
                 {"user_id": user_id},
             ).first()
 
+            # user doesn't exist
             if existing_user is None:
                 # based on the str, create a uuid and append the value to snapTrade. Get a key from snapTrade and store in the database
                 snaptrade_id = uuid.uuid4()
-                register_response = snapTrade.authentication.register_snap_trade_user(user_id=str(user_id))
+                # I'm getting an error here where user_id already exists?? 
+                register_response = snapTrade.authentication.register_snap_trade_user(user_id=str(snaptrade_id))
                 user_secret = register_response.body["userSecret"]
                 
                 # based on the type of the user, change the schema of the snaptrade_id table for the specific column
@@ -99,6 +101,7 @@ def getAllAccountsFromConnection(snapTrade_id: Annotated[str, Cookie()], connect
 @router.get("/accountInformation")
 def getAccountInformation(snapTrade_id: Annotated[str, Cookie()], account_id: str):
     snaptrade_usersecret_id = getSnapTradeSecretID(snapTrade_id)
+    # may have to change the method name
     account_information = snapTrade.account_information.get_user_account_details(
         user_id=snapTrade_id,
         user_secret=snaptrade_usersecret_id,
