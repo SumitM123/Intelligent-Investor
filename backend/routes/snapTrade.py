@@ -75,23 +75,42 @@ def addUser(user_id: Annotated[UUID, Cookie()]):
     
 @router.get("/generateConnectionPortal")
 def generateConnectionPortal(
-    user_id: Annotated[UUID, Cookie()],
     snapTrade_id: Annotated[str, Cookie(alias="snapTradeUserID")],
 ):
-
+    print("SnapTrade_id being received" + snapTrade_id)
     snaptrade_usersecret_id = getSnapTradeSecretID(snapTrade_id)
-
-    generateConnectionURLRequest = httpx.post(
-        "https://api.snaptrade.com/api/v1/snapTrade/login",
-        json={"userId": str(snapTrade_id), "userSecret": str(snaptrade_usersecret_id)},
-    )
+    print("SnapTrade_id user secret being received" + snaptrade_usersecret_id)
+    
+    try:
+        generateConnectionURLRequest = httpx.post(
+            "https://api.snaptrade.com/api/v1/snapTrade/login",
+            json={"userId": str(snapTrade_id), "userSecret": str(snaptrade_usersecret_id)},
+        )
+    except Exception as exc:
+        print("Error generating the URI" + str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "message": "Failed to reach SnapTrade login endpoint",
+                "error": str(exc),
+            },
+        )
+    
     
     connectionURLJSON = generateConnectionURLRequest.json()
 
-    urlToClient = connectionURLJSON["redirectURI"]
-    return {
-        "redirectURI": urlToClient
-    }
+    # Guard against missing redirectURI so we fail gracefully instead of raising KeyError
+    urlToClient = connectionURLJSON.get("redirectURI")
+    if not urlToClient:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "message": "SnapTrade response did not include redirectURI",
+                "response": connectionURLJSON,
+            },
+        )
+
+    return {"redirectURI": urlToClient}
 
 @router.get("/getAllAccountsFromConnection")
 def getAllAccountsFromConnection(
