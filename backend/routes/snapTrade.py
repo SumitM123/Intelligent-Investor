@@ -11,7 +11,6 @@ from typing import Annotated
 from database import SessionLocal
 from sqlalchemy import text
 from frequenty_used_methods import getSnapTradeSecretID
-import httpx
 
 router = APIRouter(prefix="/api/snapTrade")
 
@@ -82,9 +81,10 @@ def generateConnectionPortal(
     print("SnapTrade_id user secret being received" + snaptrade_usersecret_id)
     
     try:
-        generateConnectionURLRequest = httpx.post(
-            "https://api.snaptrade.com/api/v1/snapTrade/login",
-            json={"userId": str(snapTrade_id), "userSecret": str(snaptrade_usersecret_id)},
+        # Use official SDK so client credentials are sent correctly
+        connection_response = snapTrade.authentication.login_snap_trade_user(
+            user_id=str(snapTrade_id),
+            user_secret=str(snaptrade_usersecret_id),
         )
     except Exception as exc:
         print("Error generating the URI" + str(exc))
@@ -95,12 +95,12 @@ def generateConnectionPortal(
                 "error": str(exc),
             },
         )
-    
-    
-    connectionURLJSON = generateConnectionURLRequest.json()
+
+    # SDK responses keep JSON in .body; fall back to raw object in case signature differs
+    connectionURLJSON = getattr(connection_response, "body", connection_response)
 
     # Guard against missing redirectURI so we fail gracefully instead of raising KeyError
-    urlToClient = connectionURLJSON.get("redirectURI")
+    urlToClient = connectionURLJSON.get("redirectURI") if isinstance(connectionURLJSON, dict) else None
     if not urlToClient:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,

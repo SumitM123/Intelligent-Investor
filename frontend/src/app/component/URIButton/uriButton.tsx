@@ -1,7 +1,7 @@
 "use client"
 import React from "react";
 import { useUserContext} from "../../context/UserContext";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { SnapTradeReact } from 'snaptrade-react';
 import { usePrevPageContext } from "@/app/context/prevPageURL";
 import { useRouter } from "next/navigation";
@@ -14,7 +14,11 @@ function URIButton( {uriGenerated, prevPageURLNav} : uri) {
     const { isSignedIn } = useUserContext();
     const {setPrevPage, setConnectionID} = usePrevPageContext();
     const router = useRouter();
-    setPrevPage(prevPageURLNav);
+
+    // Keep prev page in context without triggering setState during render
+    useEffect(() => {
+        setPrevPage(prevPageURLNav);
+    }, [prevPageURLNav, setPrevPage]);
     const buttonStyle: React.CSSProperties = {
         padding: "10px 16px",
         borderRadius: "8px",
@@ -42,12 +46,22 @@ function URIButton( {uriGenerated, prevPageURLNav} : uri) {
         close={onClose} // After setOpen(), you can route to a different page for accounts
         onSuccess={ (authorizationID) => {
                 setConnectionID(authorizationID);
-                router.push("/pages/typesOfInvestor/accountChoosing");
+                router.push("/pages/typesOfInvestor/accountsChoosing");
             }
         }
         onError={
             (error) => {
                 console.error("Trouble connection to brokerage account: " + error.detail);
+            }
+        }
+        onExit={
+            () => {
+                setOpen(false);
+                if(prevPageURLNav === "defensive") {
+                    router.push("/pages/typesOfInvestor/defensivePage");
+                } else {
+                    router.push("/pages/typesOfInvestor/enterprisingPage");
+                }
             }
         }
       />
