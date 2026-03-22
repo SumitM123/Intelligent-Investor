@@ -7,9 +7,10 @@ import { usePrevPageContext } from "@/app/context/prevPageURL";
 import { useRouter } from "next/navigation";
 interface uri {
     uriGenerated : string,
-    prevPageURLNav: string
+    prevPageURLNav: string,
+    onRefresh?: () => void,
 }
-function URIButton( {uriGenerated, prevPageURLNav} : uri) {
+function URIButton( {uriGenerated, prevPageURLNav, onRefresh} : uri) {
     const [open, setOpen] = useState(false);
     const { isSignedIn } = useUserContext();
     const {setPrevPage, setConnectionID} = usePrevPageContext();
@@ -57,11 +58,13 @@ function URIButton( {uriGenerated, prevPageURLNav} : uri) {
         onExit={
             () => {
                 setOpen(false);
+                onRefresh?.();
                 if(prevPageURLNav === "defensive") {
                     router.push("/pages/typesOfInvestor/defensivePage");
                 } else {
                     router.push("/pages/typesOfInvestor/enterprisingPage");
                 }
+                router.refresh();
             }
         }
       />

@@ -2,7 +2,7 @@
 import React, { useEffect } from "react";
 import { useState } from "react";
 import URIButton from "@/app/component/URIButton/uriButton";
-import { usePrevPageContext } from "@/app/context/prevPageURL";
+import { prevPageContext, usePrevPageContext } from "@/app/context/prevPageURL";
 // import { useUserContext } from "@/app/context/UserContext";
 // The prevPageURl is the URL to go back to once it's been finished
 interface ConnectionURLProps {
@@ -14,7 +14,7 @@ interface ConnectionURLProps {
 
 function ConnectionURL({ prevPageURL }: ConnectionURLProps) {
     const [uriGenerated, setURIGenerated] = useState<string>("");
-    
+    const prevPageContext = usePrevPageContext();
     async function generateURI() {
         let data: { redirectURI?: string } | null = null;
         try {
@@ -31,16 +31,17 @@ function ConnectionURL({ prevPageURL }: ConnectionURLProps) {
             } 
         return data?.redirectURI ?? "";
     }
-    useEffect(() => {
-        const loadURI = async () => {
-            setURIGenerated(await generateURI());
-        };
 
+    const loadURI = async () => {
+        setURIGenerated(await generateURI());
+    };
+
+    useEffect(() => {
         void loadURI();    
     }, []);
     return (
         <div>
-            {uriGenerated !== "" && <URIButton uriGenerated={uriGenerated} prevPageURLNav={prevPageURL}/>}
+            {uriGenerated !== "" && <URIButton uriGenerated={uriGenerated} prevPageURLNav={prevPageURL} onRefresh={loadURI}/>}
             {uriGenerated === "" && <a> Receiving the URI to connect brokerage </a>}
         </div>
     );
