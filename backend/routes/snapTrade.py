@@ -119,11 +119,14 @@ def getAllAccountsFromConnection(
 ):
     snaptrade_usersecret_id = getSnapTradeSecretID(snapTrade_id)
     allAccountsFromAllConnection = snapTrade.account_information.list_user_accounts(user_id=snapTrade_id, user_secret=snaptrade_usersecret_id).body
+    print("Successful getting the usersecret id and the all the accounts")
+    print("All the accounts from all connection", allAccountsFromAllConnection)
     # get's all the valid accounts of the USD currency and within the right connection
     accountsForConnection = []
     for brokerageAccount in allAccountsFromAllConnection:
         if brokerageAccount["brokerage_authorization"] == connection_id and brokerageAccount["balance"]["total"]["currency"] == "USD":
-            accountsForConnection.append[brokerageAccount]
+            accountsForConnection.append(brokerageAccount)
+    print("The accounts that are under the connection:", accountsForConnection)
     return {"accounts_connection" : accountsForConnection}
 
 @router.get("/accountInformation")
