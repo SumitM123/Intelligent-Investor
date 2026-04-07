@@ -17,6 +17,7 @@ function listAllAccounts() {
     const [selectedAccountId, setSelectedAccountId] = useState<string>("");
     const [isLoading, setIsLoading] = useState<boolean>(true);
     const [error, setError] = useState<string>("");
+    const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
     //contains the prevPageURL and the connectionID
     const accountListingContext = usePrevPageContext();
 
@@ -30,7 +31,7 @@ function listAllAccounts() {
             try {
                 const params = new URLSearchParams();
                 params.append("account_id", selectedAccountId);
-                const res = await fetch(`http://backend:8000/api/snapTrade/accountInformation?${params}`);
+                const res = await fetch(`${apiBaseUrl}/api/snapTrade/accountInformation?${params}`);
                 
             } catch (err) {
                 const message = (err as Error).message;
@@ -43,14 +44,15 @@ function listAllAccounts() {
             try {
                 const params = new URLSearchParams();
                 params.append("connection_id", accountListingContext.connectionID);
-                const response = await fetch(`http://backend:8000/api/snapTrade/getAllAccountsFromConnection?${params}`, {
+                const response = await fetch(`${apiBaseUrl}/api/snapTrade/getAllAccountsFromConnection?${params}`, {
                     credentials: "include"
                 });  
+                console.log("Got all the accounts from the connection");
 
                 if (!response.ok) {
                     throw new Error(`Request failed with status ${response.status}`);
                 }
-
+                console.log("The response object is good for getting the accounts");
                 const resJSON = await response.json();
                 const fetchedAccounts = (resJSON["accounts_connection"] ?? []) as BrokerageAccount[];
                 setAllAccounts(fetchedAccounts);
@@ -73,7 +75,7 @@ function listAllAccounts() {
 
         void gettingRelevantAccounts();
 
-    }, [accountListingContext.connectionID]);
+    }, [accountListingContext.connectionID, apiBaseUrl]);
 
     return (
         <div>

@@ -14,7 +14,6 @@ interface ConnectionURLProps {
 
 function ConnectionURL({ prevPageURL }: ConnectionURLProps) {
     const [uriGenerated, setURIGenerated] = useState<string>("");
-    const prevPageContext = usePrevPageContext();
     async function generateURI() {
         let data: { redirectURI?: string } | null = null;
         try {

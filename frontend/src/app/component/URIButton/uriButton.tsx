@@ -41,33 +41,33 @@ function URIButton( {uriGenerated, prevPageURLNav, onRefresh} : uri) {
             }}>
                 Connect to Brokerage
             </button>
-          <SnapTradeReact
-        loginLink={uriGenerated}
-        isOpen={open}
-        close={onClose} // After setOpen(), you can route to a different page for accounts
-        onSuccess={ (authorizationID) => {
-                setConnectionID(authorizationID);
-                router.push("/pages/typesOfInvestor/accountsChoosing");
-            }
-        }
-        onError={
-            (error) => {
-                console.error("Trouble connection to brokerage account: " + error.detail);
-            }
-        }
-        onExit={
-            () => {
-                setOpen(false);
-                onRefresh?.();
-                if(prevPageURLNav === "defensive") {
-                    router.push("/pages/typesOfInvestor/defensivePage");
-                } else {
-                    router.push("/pages/typesOfInvestor/enterprisingPage");
+            <SnapTradeReact
+                loginLink={uriGenerated}
+                isOpen={open}
+                close={onClose} // After setOpen(), you can route to a different page for accounts
+                onSuccess={ (authorizationID) => {
+                        setConnectionID(authorizationID);
+                        router.push("/pages/typesOfInvestor/accountsChoosing");
+                    }
                 }
-                router.refresh();
-            }
-        }
-      />
+                onError={
+                    (error) => {
+                        console.error("Trouble connection to brokerage account: " + error.detail);
+                    }
+                }
+                onExit={
+                    () => {
+                        setOpen(false);
+                        onRefresh?.();
+                        if(prevPageURLNav === "defensive") {
+                            router.push("/pages/typesOfInvestor/defensivePage");
+                        } else {
+                            router.push("/pages/typesOfInvestor/enterprisingPage");
+                        }
+                        router.refresh();
+                    }
+                }
+            />
         </div>
     );
 }
