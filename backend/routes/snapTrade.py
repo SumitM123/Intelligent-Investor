@@ -117,17 +117,98 @@ def getAllAccountsFromConnection(
     snapTrade_id: Annotated[str, Cookie(alias="snapTradeUserID")],
     connection_id: str,
 ):
-    snaptrade_usersecret_id = getSnapTradeSecretID(snapTrade_id)
-    allAccountsFromAllConnection = snapTrade.account_information.list_user_accounts(user_id=snapTrade_id, user_secret=snaptrade_usersecret_id).body
+    '''
+        snaptrade_id: uuid, connection_id: str
+
+        You have a table with schema snaptrade_id, connection_id, arrayOfAllAccounts
+    '''
+    # Resolve the SnapTrade secret first; if missing/invalid, fail with invalid request.
+    try:
+        snaptrade_usersecret_id = getSnapTradeSecretID(snapTrade_id)
+    except HTTPException:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid request: SnapTrade secret was not found for this user",
+        )
+
+    if not snaptrade_usersecret_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid request: SnapTrade secret was not found for this user",
+        )
+
+    # Fast path: return cached JSONB accounts by connection_id.
+    with SessionLocal() as session:
+        existing_row = session.execute(
+            text(
+                """
+                SELECT accounts
+                FROM snaptrade_connection_accounts
+                WHERE connection_id = :connection_id
+                LIMIT 1
+                """
+            ),
+            {"connection_id": connection_id},
+        ).first()
+
+    if existing_row is not None:
+        raw_accounts = existing_row[0] or []
+        accountsForConnection = []
+
+        # Ensure each entry is returned as an account object (dict).
+        for account_json in raw_accounts:
+            if isinstance(account_json, dict):
+                accountsForConnection.append(account_json)
+            else:
+                try:
+                    import json
+                    accountsForConnection.append(json.loads(account_json))
+                except Exception:
+                    continue
+
+        return {"accounts_connection": accountsForConnection}
+
+    # Cache miss: fetch from SnapTrade, filter for this connection + USD, then persist.
+    allAccountsFromAllConnection = snapTrade.account_information.list_user_accounts(
+        user_id=snapTrade_id,
+        user_secret=snaptrade_usersecret_id,
+    ).body
     print("Successful getting the usersecret id and the all the accounts")
     print("All the accounts from all connection", allAccountsFromAllConnection)
-    # get's all the valid accounts of the USD currency and within the right connection
+
     accountsForConnection = []
     for brokerageAccount in allAccountsFromAllConnection:
         if brokerageAccount["brokerage_authorization"] == connection_id and brokerageAccount["balance"]["total"]["currency"] == "USD":
             accountsForConnection.append(brokerageAccount)
+
     print("The accounts that are under the connection:", accountsForConnection)
-    return {"accounts_connection" : accountsForConnection}
+
+    with SessionLocal() as session:
+        try:
+            import json
+
+            session.execute(
+                text(
+                    """
+                    INSERT INTO snaptrade_connection_accounts (snaptrade_id, connection_id, accounts)
+                    VALUES (:snaptrade_id, :connection_id, CAST(:accounts AS jsonb))
+                    ON CONFLICT (connection_id) DO UPDATE SET
+                        snaptrade_id = EXCLUDED.snaptrade_id,
+                        accounts = EXCLUDED.accounts
+                    """
+                ),
+                {
+                    "snaptrade_id": snapTrade_id,
+                    "connection_id": connection_id,
+                    "accounts": json.dumps(accountsForConnection),
+                },
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+
+    return {"accounts_connection": accountsForConnection}
 
 @router.get("/accountInformation")
 def getAccountInformation(
