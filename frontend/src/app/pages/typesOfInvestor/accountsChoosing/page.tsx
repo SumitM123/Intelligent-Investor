@@ -5,6 +5,7 @@
 */
 "use client"
 import { usePrevPageContext } from "@/app/context/prevPageURL";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 interface BrokerageAccount {
@@ -18,6 +19,7 @@ function listAllAccounts() {
     const [isLoading, setIsLoading] = useState<boolean>(true);
     const [error, setError] = useState<string>("");
     const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
+    const router = useRouter();
     //contains the prevPageURL and the connectionID
     const accountListingContext = usePrevPageContext();
 
@@ -102,7 +104,8 @@ function listAllAccounts() {
                         ))}
                     </select>
                     <button type="button" onClick={() => {
-                        
+                        accountListingContext.setAccountID(selectedAccountId);
+                        router.push(`/pages/typesOfInvestor/viewingPage?accountID=${encodeURIComponent(selectedAccountId)}`);
                     }}>Select</button>
                 </>
             )}
