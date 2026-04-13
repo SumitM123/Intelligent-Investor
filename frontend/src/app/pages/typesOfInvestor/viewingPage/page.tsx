@@ -43,7 +43,7 @@ export default async function ViewingPage({ searchParams }: ViewingPageProps) {
 			accountError = error instanceof Error ? error.message : "Failed to fetch account information";
 		}
 	} else {
-        
+		
     }
 
 	return (
