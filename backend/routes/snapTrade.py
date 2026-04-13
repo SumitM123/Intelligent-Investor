@@ -11,6 +11,9 @@ from typing import Annotated
 from database import SessionLocal
 from sqlalchemy import text
 from frequenty_used_methods import getSnapTradeSecretID
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
+import re
 
 router = APIRouter(prefix="/api/snapTrade")
 
@@ -224,3 +227,241 @@ def getAccountInformation(
     )
     return {"account_information": account_information.body}
 
+
+'''
+Create a GET route in it would take in accountID, and stock symbol as query parameters. The snaptrade_id would be 
+    included inside the header stored inside of a cookie.  Then, inside the method first retrive snaptrade_usersecret_id 
+    by calling the getSnapTradeSecretID() method and input the snaptrade_id argument inside the parenthesis. If the usersecret id 
+    doesn't exist, then return an HTTP exception with the respective status code for the particular matter. If it exists, then 
+    continue on with the method. 
+
+    Dividends table schema: account_id: string, stock_symbol: string, infomation: Array[dividend_info], late_checked: TIMESTAMPTZ
+
+    Make a query to the database trying to find the entry with the specific account_id. 
+        If not being able to find the row:
+            1) Make a request to the account_information.get_account_activities() method with the necessary parameters, such as 
+            account_id, user_id, user_secret. Set the start_date to be the since account_creation make sure it's in the right format. 
+            And set end_date to the time of the request. Again, set it such that it's in the right format. The type should be of DIVIDEND.
+            2) Once the object is retrived, go through every single element inside the data property, and ensure that the symbol is the same 
+            symbol as the stock symbol that's provided as the argument. If it's the same symbol, append a tuple of (amount, DPS, units, trade_date)
+            to an array. 
+            3) After doing so, create a new entry inside the dividends table with the respective information based on the schema
+            4) Then, return the row
+        else:
+            return the row
+    
+    After getting the specific row, I want you to return the information column with the right structure.
+
+    *** Important: Ensure that all the dates are time-zone aware and that the time-zone is converted to the same timezone as the
+    one on wallstreet if not already. 
+
+'''
+@router.get("/getDividends")
+def getDividends(
+    snapTrade_id: Annotated[str, Cookie(alias="snapTradeUserID")],
+    accountID: str,
+    stock_symbol: str,
+):
+    # Basic ticker validation: alphanumeric plus common exchange separators like "." and "-".
+    normalized_symbol = stock_symbol.strip().upper()
+    if not re.fullmatch(r"[A-Z0-9][A-Z0-9.\-]{0,24}", normalized_symbol):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid request: stock_symbol is invalid",
+        )
+
+    wall_street_tz = ZoneInfo("America/New_York")
+
+    try:
+        snaptrade_usersecret_id = getSnapTradeSecretID(snapTrade_id)
+    except HTTPException:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid request: SnapTrade secret was not found for this user",
+        )
+
+    if not snaptrade_usersecret_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid request: SnapTrade secret was not found for this user",
+        )
+    
+    def _read_cached_row(session):
+        return session.execute(
+            text(
+                """
+                SELECT account_id, stock_symbol, last_checked,
+                       COALESCE((
+                           SELECT jsonb_agg(
+                               jsonb_build_object(
+                                   'amount_earned', (d).amount_earned,
+                                   'dps', (d).dps,
+                                   'units', (d).units,
+                                   'trade_date', (d).trade_date
+                               )
+                           )
+                           FROM unnest(information) AS d
+                       ), '[]'::jsonb) AS information
+                FROM snaptrade_dividends
+                WHERE account_id = :account_id AND stock_symbol = :stock_symbol
+                LIMIT 1
+                """
+            ),
+            {"account_id": accountID, "stock_symbol": stock_symbol},
+        ).first()
+
+    with SessionLocal() as session:
+        existing_row = _read_cached_row(session)
+        if existing_row is not None:
+            return {
+                "account_id": existing_row[0],
+                "stock_symbol": existing_row[1],
+                "last_checked": existing_row[2],
+                "information": existing_row[3] or [],
+            }
+
+    # Cache miss: fetch dividend activities and persist them.
+
+    # This is to get when the account was created to start from the beginning. This occurs only when the entry didn't exist initially
+    account_detail_response = snapTrade.account_information.get_user_account_details(
+        user_id=snapTrade_id,
+        user_secret=snaptrade_usersecret_id,
+        account_id=accountID,
+    )
+    account_details = account_detail_response.body or {}
+
+    created_date_raw = account_details.get("created_date")
+    start_dt = None
+    if isinstance(created_date_raw, datetime):
+        start_dt = created_date_raw
+    elif isinstance(created_date_raw, str):
+        try:
+            start_dt = datetime.fromisoformat(created_date_raw.replace("Z", "+00:00"))
+        except ValueError:
+            start_dt = None
+
+    if start_dt is None:
+        start_dt = datetime.now(timezone.utc) - timedelta(days=3650)
+
+    if start_dt.tzinfo is None:
+        start_dt = start_dt.replace(tzinfo=timezone.utc)
+
+    now_dt = datetime.now(timezone.utc)
+
+    activities_response = snapTrade.account_information.get_account_activities(
+        account_id=accountID,
+        user_id=snapTrade_id,
+        user_secret=snaptrade_usersecret_id,
+        start_date=start_dt.date(),
+        end_date=now_dt.date(),
+        type="DIVIDEND",
+        limit=1000,
+    )
+    activities_body = activities_response.body or {}
+    activities = activities_body.get("data", []) if isinstance(activities_body, dict) else []
+
+    requested_symbol = normalized_symbol
+    dividend_tuples = []
+
+    for activity in activities:
+        if activity.get("type") != "DIVIDEND":
+            continue
+
+        activity_symbol = activity.get("symbol") or {}
+        ticker = (activity_symbol.get("symbol") or "").upper()
+        raw_ticker = (activity_symbol.get("raw_symbol") or "").upper()
+        if requested_symbol not in {ticker, raw_ticker}:
+            continue
+
+        amount = activity.get("amount")
+        units = activity.get("units")
+        dps = None
+        if amount is not None and units not in (None, 0):
+            dps = float(amount) / float(units)
+
+        trade_date_raw = activity.get("trade_date")
+        trade_date_dt = None
+        if isinstance(trade_date_raw, datetime):
+            trade_date_dt = trade_date_raw
+        elif isinstance(trade_date_raw, str):
+            try:
+                trade_date_dt = datetime.fromisoformat(trade_date_raw.replace("Z", "+00:00"))
+            except ValueError:
+                trade_date_dt = None
+
+        if trade_date_dt is None:
+            continue
+
+        if trade_date_dt.tzinfo is None:
+            trade_date_dt = trade_date_dt.replace(tzinfo=timezone.utc)
+        trade_date_dt = trade_date_dt.astimezone(wall_street_tz)
+
+        dividend_tuples.append(
+            {
+                "amount_earned": amount,
+                "dps": dps,
+                "units": units,
+                "trade_date": trade_date_dt,
+            }
+        )
+
+    with SessionLocal() as session:
+        try:
+            session.execute(
+                text(
+                    """
+                    INSERT INTO snaptrade_dividends (account_id, stock_symbol, information, last_checked)
+                    VALUES (:account_id, :stock_symbol, ARRAY[]::dividend_info[], NOW())
+                    ON CONFLICT (account_id, stock_symbol) DO UPDATE SET
+                        last_checked = NOW()
+                    """
+                ),
+                {"account_id": accountID, "stock_symbol": stock_symbol},
+            )
+
+            for item in dividend_tuples:
+                session.execute(
+                    text(
+                        """
+                        UPDATE snaptrade_dividends
+                        SET information = array_append(
+                                information,
+                                ROW(:amount_earned, :dps, :units, :trade_date)::dividend_info
+                            ),
+                            last_checked = NOW()
+                        WHERE account_id = :account_id
+                          AND stock_symbol = :stock_symbol
+                        """
+                    ),
+                    {
+                        "amount_earned": item["amount_earned"],
+                        "dps": item["dps"],
+                        "units": item["units"],
+                        "trade_date": item["trade_date"],
+                        "account_id": accountID,
+                        "stock_symbol": stock_symbol,
+                    },
+                )
+
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+
+        inserted_row = _read_cached_row(session)
+
+    if inserted_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to store dividend information",
+        )
+
+    return {
+        "account_id": inserted_row[0],
+        "stock_symbol": inserted_row[1],
+        "last_checked": inserted_row[2],
+        "information": inserted_row[3] or [],
+    }
+
+
+    
