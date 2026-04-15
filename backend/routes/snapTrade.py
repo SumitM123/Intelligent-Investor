@@ -680,4 +680,20 @@ def updateDividends(
         "last_checked": updated_row[2],
         "information": updated_row[3] or [],
     }
-    
+'''
+    Architecture:
+        1) Make a request to an API to get the payment date for dividend in the general market
+        for stocks. This is going to be a scheduler starting every year
+        2) Once that scheduler is given a value, then based on the values, we make another scheduler
+        that'll run during those given value times
+        3) In of the times, it'll get all the account in each connection_id from the snaptrade_connection_accounts
+        table
+        4) Once you get all the accounts, it'll run the updateDividends() route for each of them to update the amount 
+        of dividends they'll get
+
+        5) Have a refresh button that'll trigger the update dividends in the backend for the particular account_id.
+            - Stop the request from going through if pushed too many times from before
+        
+'''
+@router.get("getAllUsers")
+def getAllUserID(): 
