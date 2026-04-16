@@ -680,6 +680,8 @@ def updateDividends(
         "last_checked": updated_row[2],
         "information": updated_row[3] or [],
     }
+
+    
 '''
     Architecture:
         1) Make a request to an API to get the payment date for dividend in the general market
