@@ -213,6 +213,24 @@ def getAllAccountsFromConnection(
 
     return {"accounts_connection": accountsForConnection}
 
+'''
+    Create a GET route in it would take in accountID as query parameters. The snaptrade_id would be 
+    included inside the header stored inside of a cookie.  Then, inside the method first retrive snaptrade_usersecret_id 
+    by calling the getSnapTradeSecretID() method and input the snaptrade_id argument inside the parenthesis. If the usersecret id 
+    doesn't exist, then return an HTTP exception with the respective status code for the particular matter. If it exists, then 
+    continue on with the method. 
+
+    Based on the snaptrade API, make a request so that it first receives the balance of the account. initialize two array variables: stock
+    and bond. Then, once you do that, itereate through all the securities that the account holds.  As you iterate, check if it's a bond or a stock. 
+    If it's a bond, append it to the bond array as well as the amount of money invested in that bond as a tuple, for example ("bond", amount of money)
+    and do the same for stock. Once that's done for all the securities that the account holds do the next step.
+
+    For each of the bond, 
+    Based on the snaptrade API, make a request to the .get_user_account_positions() method. 
+'''
+@router.get("/get_user_account_positions")
+
+
 @router.get("/accountInformation")
 def getAccountInformation(
     snapTrade_id: Annotated[str, Cookie(alias="snapTradeUserID")],
@@ -225,6 +243,8 @@ def getAccountInformation(
         user_secret=snaptrade_usersecret_id,
         account_id=account_id
     )
+
+    snapTrade.account_information.get_user_account_positions()
     return {"account_information": account_information.body}
 
 
