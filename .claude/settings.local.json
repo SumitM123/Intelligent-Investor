@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\sumit\\\\Documents\\\\Projects\\\\Productivity-Assistant-clean\\\\backend\" -Recurse -File -Filter \"*.py\")",
+      "Bash(Select-Object -ExpandProperty FullName)"
+    ],
+    "deny": [
+      "Read(**/.env*)",
+      "Edit(**/.env*)",
+      "Write(**/.env*)",
+      "Edit(**/Dockerfile*)",
+      "Write(**/Dockerfile*)",
+      "Edit(**/docker-compose*)",
+      "Write(**/docker-compose*)"
+    ]
+  }
+}
