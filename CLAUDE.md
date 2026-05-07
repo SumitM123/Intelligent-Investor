@@ -21,30 +21,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Development Commands
 
-### Full stack (Docker — preferred)
+All three services (frontend, backend, db) run inside Docker. Do not run them directly on the host.
+
 ```bash
+# Start everything (first run or after Dockerfile changes)
 docker compose -f docker-compose.dev.yml up --build
+
+# Start without rebuilding images
+docker compose -f docker-compose.dev.yml up
+
+# Rebuild a single service
+docker compose -f docker-compose.dev.yml up --build backend
 ```
+
 Frontend: `http://localhost:3000` | Backend: `http://localhost:8000`
 
-### Frontend only
+Lint (runs inside the frontend container):
 ```bash
-cd frontend
-npm install
-npm run dev      # dev server
-npm run build    # production build
-npm run lint     # ESLint
+docker compose -f docker-compose.dev.yml exec frontend npm run lint
 ```
 
-### Backend only
-```bash
-cd backend
-pip install -r requirements.txt
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
-
-Required env vars for backend: `DATABASE_URL`, `SNAPTRADE_CLIENT_ID`, `SNAPTRADE_SECRET`  
-Required env vars for frontend: `NEXT_PUBLIC_GOOGLE_CLIENT_ID`, `NEXT_PUBLIC_API_BASE`, `INTERNAL_API_BASE`
+Required env vars (set in a `.env` file at the project root):
+- `NEXT_PUBLIC_GOOGLE_CLIENT_ID`
+- `SNAPTRADE_CLIENT_ID`
+- `SNAPTRADE_SECRET`
 
 ## Architecture
 

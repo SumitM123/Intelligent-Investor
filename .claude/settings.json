@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "deny": [
+      "Edit(toDo.txt)",
+      "Write(toDo.txt)"
+    ]
+  },
+  "enableAllProjectMcpServers": true
+}
