@@ -214,6 +214,9 @@ def getAllAccountsFromConnection(
     return {"accounts_connection": accountsForConnection}
 
 '''
+    The purpose of this endpoint is to provide how much money is invested for each security within the connected account. Then, 
+    based on the stock, show you the proportion of money for common stocks, and high-grade bonds. 
+
     Create a GET route in it would take in accountID as query parameters. The snaptrade_id would be 
     included inside the header stored inside of a cookie.  Then, inside the method first retrive snaptrade_usersecret_id 
     by calling the getSnapTradeSecretID() method and input the snaptrade_id argument inside the parenthesis. If the usersecret id 
@@ -225,7 +228,7 @@ def getAllAccountsFromConnection(
     If it's a bond, append it to the bond array as well as the amount of money invested in that bond as a tuple, for example ("bond", amount of money)
     and do the same for stock. Once that's done for all the securities that the account holds do the next step.
 
-    For each of the bond, 
+    For each of the bond. Based on bond get the ISIN then input ISIN to xpressapi to get bond-grade. 
     Based on the snaptrade API, make a request to the .get_user_account_positions() method. 
 '''
 @router.get("/get_user_account_positions")
@@ -718,4 +721,5 @@ def updateDividends(
         
 '''
 @router.get("getAllUsers")
-def getAllUserID(): 
+def getAllUserID():
+    pass
