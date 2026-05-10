@@ -7,4 +7,6 @@ Whenever this skill is loaded:
 2. Immediately invoke the 'researcher' subagent using the 'agent' tool.
 2. Provide the subagent with the specific documentation URL or library name.
 3. Wait for the subagent to return a summary of its research.
-4. Use that researched context to finalize any code edits.
+4. Create a new .md file under the '../docs-provider' folder, with an accurate file name, and put in the details 
+that are relevant into the file. Follow the format of the '../docs-provider/snaptrade-docs.md' file.
+5. Use that researched context to finalize any code edits.
