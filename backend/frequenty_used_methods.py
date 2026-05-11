@@ -3,6 +3,43 @@ from database import SessionLocal
 from fastapi import FastAPI, Response, status, HTTPException
 from sqlalchemy import text
 from uuid import UUID
+import httpx
+import os
+from typing import Optional
+
+_AV_BASE = "https://www.alphavantage.co/query"
+
+
+def fetch_av(function: str, symbol: Optional[str] = None, **kwargs) -> dict:
+    params = {"function": function, "apikey": os.environ["ALPHA_VANTAGE_API"]}
+    if symbol:
+        params["symbol"] = symbol
+    params.update(kwargs)
+    try:
+        resp = httpx.get(_AV_BASE, params=params, timeout=20)
+        resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"AlphaVantage request failed: {exc}")
+    data = resp.json()
+    if "Information" in data or "Note" in data:
+        raise HTTPException(status_code=429, detail="AlphaVantage rate limit reached")
+    return data
+
+
+def get_eps_and_pe(symbol: str, current_price: float) -> dict:
+    data = fetch_av("EARNINGS", symbol)
+    annual = data.get("annualEarnings", [])
+    eps_values = []
+    for entry in annual[:3]:
+        raw = entry.get("reportedEPS")
+        if raw and raw != "None":
+            try:
+                eps_values.append(float(raw))
+            except ValueError:
+                pass
+    avg_eps = sum(eps_values) / len(eps_values) if eps_values else None
+    pe_ratio = (current_price / avg_eps) if (avg_eps and avg_eps > 0) else None
+    return {"avg_eps_3yr": avg_eps, "pe_ratio": pe_ratio, "eps_values": eps_values}
 
 # class User(BaseModel):
 #     google_id: str = None

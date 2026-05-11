@@ -11,9 +11,11 @@ from typing import Annotated
 from database import SessionLocal
 from sqlalchemy import text
 from frequenty_used_methods import getSnapTradeSecretID
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 from zoneinfo import ZoneInfo
 import re
+import json
+from frequenty_used_methods import fetch_av, get_eps_and_pe
 
 router = APIRouter(prefix="/api/snapTrade")
 
@@ -723,3 +725,218 @@ def updateDividends(
 @router.get("getAllUsers")
 def getAllUserID():
     pass
+
+
+def _safe_float(val, default=None):
+    if val is None or val == "None":
+        return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+
+@router.get("/isLeadingStock")
+def isLeadingStock(
+    user_id: Annotated[UUID, Cookie()],
+    symbol: str,
+):
+    normalized = symbol.strip().upper()
+    if not re.fullmatch(r"[A-Z0-9][A-Z0-9.\-]{0,24}", normalized):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid stock symbol",
+        )
+
+    # Return cached result if fresher than 3 months
+    with SessionLocal() as session:
+        cached = session.execute(
+            text(
+                """
+                SELECT symbol, is_leading, criteria_details, last_checked
+                FROM leading_stock_analysis
+                WHERE symbol = :symbol
+                  AND last_checked >= NOW() - INTERVAL '3 months'
+                LIMIT 1
+                """
+            ),
+            {"symbol": normalized},
+        ).first()
+
+    if cached is not None:
+        return {
+            "symbol": cached[0],
+            "is_leading": cached[1],
+            "criteria_details": cached[2],
+            "last_checked": cached[3],
+        }
+
+    # --- Cache miss: fetch from AlphaVantage and evaluate all 7 criteria ---
+
+    # Current price
+    quote = fetch_av("GLOBAL_QUOTE", normalized).get("Global Quote", {})
+    current_price = _safe_float(quote.get("05. price"))
+    if current_price is None:
+        raise HTTPException(status_code=502, detail="Could not retrieve stock price from AlphaVantage")
+
+    # Company overview (market cap, book value per share)
+    overview = fetch_av("COMPANY_OVERVIEW", normalized)
+    market_cap = _safe_float(overview.get("MarketCapitalization"))
+    book_value_per_share = _safe_float(overview.get("BookValue"))
+
+    # Balance sheet (most recent annual)
+    annual_balance = fetch_av("BALANCE_SHEET", normalized).get("annualReports", [])
+    latest_balance = annual_balance[0] if annual_balance else {}
+    current_assets = _safe_float(latest_balance.get("totalCurrentAssets"))
+    current_liabilities = _safe_float(latest_balance.get("totalCurrentLiabilities"))
+    long_term_debt = _safe_float(latest_balance.get("longTermDebt"), 0.0)
+
+    # Income statement (last 10 annual net incomes)
+    annual_income = fetch_av("INCOME_STATEMENT", normalized).get("annualReports", [])[:10]
+    net_incomes = [_safe_float(r.get("netIncome")) for r in annual_income]
+    net_incomes = [v for v in net_incomes if v is not None]
+
+    # EPS & P/E (criteria 6) — computed via shared helper
+    eps_result = get_eps_and_pe(normalized, current_price)
+
+    # Dividends — check for uninterrupted payments over last 20 years
+    dividends = fetch_av("DIVIDENDS", normalized).get("data", [])
+    current_year = date.today().year
+    div_years = set()
+    for d in dividends:
+        ex_date = d.get("ex_dividend_date", "")
+        if ex_date and ex_date != "None":
+            try:
+                yr = int(ex_date[:4])
+                if current_year - 20 <= yr <= current_year:
+                    div_years.add(yr)
+            except ValueError:
+                pass
+    required_div_years = set(range(current_year - 19, current_year + 1))
+    missing_div_years = sorted(required_div_years - div_years)
+
+    # CPI for inflation-adjusted $18B market cap threshold (base year: 2026)
+    cpi_entries = fetch_av("CPI", interval="annual").get("data", [])
+    latest_cpi = _safe_float(cpi_entries[0].get("value")) if cpi_entries else None
+    cpi_2026 = next(
+        (_safe_float(e["value"]) for e in cpi_entries if e.get("date", "").startswith("2026")),
+        latest_cpi,
+    )
+    inflation_factor = (latest_cpi / cpi_2026) if (latest_cpi and cpi_2026 and cpi_2026 > 0) else 1.0
+    market_cap_threshold = 18_000_000_000 * inflation_factor
+
+    # --- Evaluate criteria ---
+    criteria = {}
+
+    # 1. Market cap ≥ inflation-adjusted $18B
+    c1_pass = market_cap is not None and market_cap >= market_cap_threshold
+    criteria["market_cap"] = {
+        "pass": c1_pass,
+        "value": market_cap,
+        "threshold": market_cap_threshold,
+        "inflation_factor": inflation_factor,
+    }
+
+    # 2. Current ratio ≥ 2:1
+    if current_assets is not None and current_liabilities and current_liabilities > 0:
+        current_ratio = current_assets / current_liabilities
+        c2_pass = current_ratio >= 2.0
+    else:
+        current_ratio = None
+        c2_pass = False
+    criteria["current_ratio"] = {
+        "pass": c2_pass,
+        "current_assets": current_assets,
+        "current_liabilities": current_liabilities,
+        "ratio": current_ratio,
+        "threshold": 2.0,
+    }
+
+    # 3. Long-term debt ≤ net current assets
+    if current_assets is not None and current_liabilities is not None:
+        net_current_assets = current_assets - current_liabilities
+        c3_pass = long_term_debt <= net_current_assets
+    else:
+        net_current_assets = None
+        c3_pass = False
+    criteria["long_term_debt_vs_net_current_assets"] = {
+        "pass": c3_pass,
+        "long_term_debt": long_term_debt,
+        "net_current_assets": net_current_assets,
+    }
+
+    # 4. No earnings deficits in past 10 years
+    deficit_count = sum(1 for v in net_incomes if v <= 0)
+    c4_pass = len(net_incomes) >= 1 and deficit_count == 0
+    criteria["no_earnings_deficits"] = {
+        "pass": c4_pass,
+        "years_checked": len(net_incomes),
+        "deficit_count": deficit_count,
+    }
+
+    # 5. Uninterrupted dividends for 20 years
+    c5_pass = len(missing_div_years) == 0
+    criteria["uninterrupted_dividends"] = {
+        "pass": c5_pass,
+        "years_covered": len(div_years),
+        "missing_years": missing_div_years,
+    }
+
+    # 6. Price ≤ 15× average EPS (3 years)
+    avg_eps = eps_result["avg_eps_3yr"]
+    c6_pass = bool(avg_eps and avg_eps > 0 and current_price <= 15 * avg_eps)
+    criteria["price_to_earnings"] = {
+        "pass": c6_pass,
+        "current_price": current_price,
+        "avg_eps_3yr": avg_eps,
+        "pe_ratio": eps_result["pe_ratio"],
+        "threshold_multiple": 15,
+    }
+
+    # 7. Price ≤ 1.5× book value per share
+    if book_value_per_share and book_value_per_share > 0:
+        price_to_book = current_price / book_value_per_share
+        c7_pass = price_to_book <= 1.5
+    else:
+        price_to_book = None
+        c7_pass = False
+    criteria["price_to_book"] = {
+        "pass": c7_pass,
+        "current_price": current_price,
+        "book_value_per_share": book_value_per_share,
+        "price_to_book_ratio": price_to_book,
+        "threshold": 1.5,
+    }
+
+    is_leading = all([c1_pass, c2_pass, c3_pass, c4_pass, c5_pass, c6_pass, c7_pass])
+
+    # Upsert result into cache table
+    with SessionLocal() as session:
+        try:
+            session.execute(
+                text(
+                    """
+                    INSERT INTO leading_stock_analysis (symbol, is_leading, criteria_details, last_checked)
+                    VALUES (:symbol, :is_leading, CAST(:criteria_details AS jsonb), NOW())
+                    ON CONFLICT (symbol) DO UPDATE SET
+                        is_leading = EXCLUDED.is_leading,
+                        criteria_details = EXCLUDED.criteria_details,
+                        last_checked = NOW()
+                    """
+                ),
+                {
+                    "symbol": normalized,
+                    "is_leading": is_leading,
+                    "criteria_details": json.dumps(criteria),
+                },
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+
+    return {
+        "symbol": normalized,
+        "is_leading": is_leading,
+        "criteria_details": criteria,
+    }

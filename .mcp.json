@@ -1,5 +1,9 @@
 {
   "mcpServers": {
+    "alphavantage": {
+      "type": "http",
+      "url": "https://mcp.alphavantage.co/mcp?apikey=***REMOVED_ALPHAVANTAGE_KEY***"
+    },
     "postgres": {
       "command": "npx",
       "args": [
