@@ -1,5 +1,9 @@
 {
   "mcpServers": {
+    "alphavantage": {
+      "type": "http",
+      "url": "https://mcp.alphavantage.co/mcp?apikey=CD0Q3J4ENXKHGR34"
+    },
     "postgres": {
       "command": "npx",
       "args": [
