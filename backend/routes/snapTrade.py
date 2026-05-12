@@ -741,6 +741,18 @@ def isLeadingStock(
     user_id: Annotated[UUID, Cookie()],
     symbol: str,
 ):
+    
+    with SessionLocal() as session:
+        user_row = session.execute(
+            text("SELECT 1 FROM users_id WHERE user_id = :user_id LIMIT 1"),
+            {"user_id": user_id},
+        ).first()
+    if user_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+        )
+
     normalized = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z0-9][A-Z0-9.\-]{0,24}", normalized):
         raise HTTPException(
@@ -881,6 +893,31 @@ def isLeadingStock(
         "years_covered": len(div_years),
         "missing_years": missing_div_years,
     }
+    
+    # 8. EPS growth ≥ 33% over the past 10 years
+    # Compare avg EPS of the 3 most recent years vs avg EPS of the 3 earliest years in the decade.
+    eps_10yr = eps_result["eps_10yr"]
+    if len(eps_10yr) >= 6:
+        avg_recent_eps = sum(eps_10yr[:3]) / 3
+        avg_early_eps = sum(eps_10yr[-3:]) / 3
+        if avg_early_eps > 0:
+            earnings_growth_pct = ((avg_recent_eps - avg_early_eps) / avg_early_eps) * 100
+            c8_pass = earnings_growth_pct >= 33
+        else:
+            earnings_growth_pct = None
+            c8_pass = False
+    else:
+        avg_recent_eps = None
+        avg_early_eps = None
+        earnings_growth_pct = None
+        c8_pass = False
+    criteria["earnings_growth_10yr"] = {
+        "pass": c8_pass,
+        "avg_eps_recent_3yr": avg_recent_eps,
+        "avg_eps_early_3yr": avg_early_eps,
+        "growth_pct": earnings_growth_pct,
+        "threshold_pct": 33,
+    }
 
     # 6. Price ≤ 15× average EPS (3 years)
     avg_eps = eps_result["avg_eps_3yr"]
@@ -908,7 +945,7 @@ def isLeadingStock(
         "threshold": 1.5,
     }
 
-    is_leading = all([c1_pass, c2_pass, c3_pass, c4_pass, c5_pass, c6_pass, c7_pass])
+    is_leading = all([c1_pass, c2_pass, c3_pass, c4_pass, c5_pass, c6_pass, c7_pass, c8_pass])
 
     # Upsert result into cache table
     with SessionLocal() as session:
