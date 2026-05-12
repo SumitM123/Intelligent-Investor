@@ -29,17 +29,24 @@ def fetch_av(function: str, symbol: Optional[str] = None, **kwargs) -> dict:
 def get_eps_and_pe(symbol: str, current_price: float) -> dict:
     data = fetch_av("EARNINGS", symbol)
     annual = data.get("annualEarnings", [])
-    eps_values = []
-    for entry in annual[:3]:
-        raw = entry.get("reportedEPS")
-        if raw and raw != "None":
-            try:
-                eps_values.append(float(raw))
-            except ValueError:
-                pass
+
+    def _parse_eps(entries):
+        result = []
+        for entry in entries:
+            raw = entry.get("reportedEPS")
+            if raw and raw != "None":
+                try:
+                    result.append(float(raw))
+                except ValueError:
+                    pass
+        return result
+
+    eps_values = _parse_eps(annual[:3])
+    eps_10yr = _parse_eps(annual[:10])
+
     avg_eps = sum(eps_values) / len(eps_values) if eps_values else None
     pe_ratio = (current_price / avg_eps) if (avg_eps and avg_eps > 0) else None
-    return {"avg_eps_3yr": avg_eps, "pe_ratio": pe_ratio, "eps_values": eps_values}
+    return {"avg_eps_3yr": avg_eps, "pe_ratio": pe_ratio, "eps_values": eps_values, "eps_10yr": eps_10yr}
 
 # class User(BaseModel):
 #     google_id: str = None
