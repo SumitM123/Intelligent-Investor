@@ -827,13 +827,24 @@ def isLeadingStock(
     required_div_years = set(range(current_year - 19, current_year + 1))
     missing_div_years = sorted(required_div_years - div_years)
 
-    # CPI for inflation-adjusted $18B market cap threshold (base year: 2026)
+    # CPI indexed by year — reused for the $18B threshold (base year: 2026) and the
+    # YoY EPS adjustment in criterion 8. AlphaVantage returns annual CPI newest-first,
+    # so setdefault preserves the most recent reading for any given year.
     cpi_entries = fetch_av("CPI", interval="annual").get("data", [])
+    cpi_by_year = {}
+    for e in cpi_entries:
+        date_str = e.get("date", "")
+        val = _safe_float(e.get("value"))
+        if val is None or len(date_str) < 4:
+            continue
+        try:
+            yr = int(date_str[:4])
+        except ValueError:
+            continue
+        cpi_by_year.setdefault(yr, val)
+
     latest_cpi = _safe_float(cpi_entries[0].get("value")) if cpi_entries else None
-    cpi_2026 = next(
-        (_safe_float(e["value"]) for e in cpi_entries if e.get("date", "").startswith("2026")),
-        latest_cpi,
-    )
+    cpi_2026 = cpi_by_year.get(2026, latest_cpi)
     inflation_factor = (latest_cpi / cpi_2026) if (latest_cpi and cpi_2026 and cpi_2026 > 0) else 1.0
     market_cap_threshold = 18_000_000_000 * inflation_factor
 
@@ -894,12 +905,25 @@ def isLeadingStock(
         "missing_years": missing_div_years,
     }
     
-    # 8. EPS growth ≥ 33% over the past 10 years
-    # Compare avg EPS of the 3 most recent years vs avg EPS of the 3 earliest years in the decade.
-    eps_10yr = eps_result["eps_10yr"]
-    if len(eps_10yr) >= 6:
-        avg_recent_eps = sum(eps_10yr[:3]) / 3
-        avg_early_eps = sum(eps_10yr[-3:]) / 3
+    # 8. EPS growth ≥ 33% over the past 10 years, inflation-adjusted YoY.
+    # Each historical EPS is scaled to current dollars via that fiscal year's CPI
+    # before averaging, so the growth percentage reflects real earnings improvement
+    # rather than nominal drift caused by inflation.
+    eps_10yr_dated = eps_result["eps_10yr_dated"]
+
+    def _adjust_eps(year: int, eps_val: float) -> float:
+        if latest_cpi is None:
+            return eps_val
+        cpi_for_year = cpi_by_year.get(year)
+        if cpi_for_year is None or cpi_for_year <= 0:
+            return eps_val
+        return eps_val * (latest_cpi / cpi_for_year)
+
+    if len(eps_10yr_dated) >= 6:
+        adjusted_recent = [_adjust_eps(yr, val) for yr, val in eps_10yr_dated[:3]]
+        adjusted_early = [_adjust_eps(yr, val) for yr, val in eps_10yr_dated[-3:]]
+        avg_recent_eps = sum(adjusted_recent) / 3
+        avg_early_eps = sum(adjusted_early) / 3
         if avg_early_eps > 0:
             earnings_growth_pct = ((avg_recent_eps - avg_early_eps) / avg_early_eps) * 100
             c8_pass = earnings_growth_pct >= 33
@@ -917,6 +941,7 @@ def isLeadingStock(
         "avg_eps_early_3yr": avg_early_eps,
         "growth_pct": earnings_growth_pct,
         "threshold_pct": 33,
+        "inflation_adjusted": True,
     }
 
     # 6. Price ≤ 15× average EPS (3 years)

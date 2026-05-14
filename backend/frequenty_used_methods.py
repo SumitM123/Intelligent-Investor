@@ -41,12 +41,30 @@ def get_eps_and_pe(symbol: str, current_price: float) -> dict:
                     pass
         return result
 
+    def _parse_eps_with_year(entries):
+        result = []
+        for entry in entries:
+            raw = entry.get("reportedEPS")
+            fiscal_date = entry.get("fiscalDateEnding", "")
+            if raw and raw != "None" and fiscal_date:
+                try:
+                    year = int(fiscal_date[:4])
+                    result.append((year, float(raw)))
+                except ValueError:
+                    pass
+        return result
+
     eps_values = _parse_eps(annual[:3])
-    eps_10yr = _parse_eps(annual[:10])
+    eps_10yr_dated = _parse_eps_with_year(annual[:10])
 
     avg_eps = sum(eps_values) / len(eps_values) if eps_values else None
     pe_ratio = (current_price / avg_eps) if (avg_eps and avg_eps > 0) else None
-    return {"avg_eps_3yr": avg_eps, "pe_ratio": pe_ratio, "eps_values": eps_values, "eps_10yr": eps_10yr}
+    return {
+        "avg_eps_3yr": avg_eps,
+        "pe_ratio": pe_ratio,
+        "eps_values": eps_values,
+        "eps_10yr_dated": eps_10yr_dated,
+    }
 
 # class User(BaseModel):
 #     google_id: str = None
