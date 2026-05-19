@@ -367,7 +367,7 @@ Plan: Manual CUSIP Bond Entry with Backend Grade Lookup                         
      │ Known Limitations / Follow-ups                                                                         │
      │                                                                                                        │
      │ - YTM uses price=par (1000) as default because manual entry has no live price. Real YTM will be        │
-     │ available once a price field is added to the form, or once SnapTrade-provided prices are integrated.   │
+     │ available once a price field is added to the form.                                                     │
      │ - Finnhub free-tier coverage for non-Treasury bonds is uncertain. Some corporate CUSIPs may return     │
      │ empty profiles → grade = "Unclassified". Document this in the UI as expected behavior.                 │
      │ - CUSIP validation is format-only (9 alphanumeric chars). The full CUSIP checksum algorithm is not     │
