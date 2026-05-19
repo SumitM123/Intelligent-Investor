@@ -297,12 +297,6 @@ def get_user_account_positions(
 
 Also **remove** the orphaned `snapTrade.account_information.get_user_account_positions()` call at line 250 inside `getAccountInformation`.
 
-### Step 4 — Frontend: `viewingPage/page.tsx`
-- Add a second `fetch` call to `GET /api/snapTrade/get_user_account_positions?account_id={accountID}` (server-side, same cookie forwarding pattern as the existing account info fetch)
-- Render a bond holdings table with columns:
-  - Symbol | Bond Type | YTM (%) | Spread (bps) | Grade | High-Grade?
-- For bonds where profile was not found, show "Unclassified" in the Grade column
-- Keep existing account info section or replace entirely
 
 ---
 
