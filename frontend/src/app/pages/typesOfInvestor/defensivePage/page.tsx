@@ -1,44 +1,40 @@
-import React from "react";
+import { cookies } from "next/headers";
 import StockSearchBar from "@/app/component/Stock Search Bar/StockSearchBar";
 import ConnectionURL from "@/app/component/ConnectionURL/connectionURL";
-import { useUserContext } from "@/app/context/UserContext";
-// import {UserContext, useUserContext} from '../../Contexts/UserContext'
-function DefensivePage () {
-    
-    /* 
-        Diversifying Porfolio: Each stock is within on industry
-            1) Information Technology
-            2) Healthcare: Pharmaceuticals, biotech, medical devices, services.
-            3) Financials: Banks, insurance, investment firms.
-            4) Energy: Oil & gas, renewables, utilities.
-            5) Industrials: Manufacturing, aerospace, construction.
-            6) Consumer Staples: Food, beverages, household goods (less sensitive to economic dips).
-            7) Consumer Discretionary: Retail, autos, entertainment (sensitive to economy).
-            8) Real Estate: REITs, property development.
-            9) Utilities: Electric, gas, water companies (often stable, dividend payers). 
+import BondList, { type BondEntry } from "@/app/component/BondList/BondList";
 
-        Based on the total amount of money, provide a diagram showing the proportion of portfolio 
-        going towards investing in each industry
-    */
-    // useEffect(() => {
-    //     // This will be added as a query string. If you want to add it as a parameter, then directly just add it to URL
-    //     const stocksArr = axios.get('/api/stocks/getStocks', {
-    //         params: {
-    //             ID: userContext.userID
-    //         }
-    //     })
-    //     const bondsArr = axios.get('/api/stocks/getBonds')
-    // }, []);
+export default async function DefensivePage() {
+    const cookieStore = await cookies();
+    const userIdCookie = cookieStore.get("user_id")?.value;
+    const apiBaseUrl = process.env.INTERNAL_API_BASE ?? "http://backend:8000";
+
+    let initialBonds: BondEntry[] = [];
+    if (userIdCookie) {
+        try {
+            const res = await fetch(
+                `${apiBaseUrl}/api/bonds?is_defensive=true`,
+                {
+                    headers: { Cookie: `user_id=${userIdCookie}` },
+                    cache: "no-store",
+                },
+            );
+            if (res.ok) {
+                const json = (await res.json()) as { bonds?: BondEntry[] };
+                initialBonds = json.bonds ?? [];
+            } else {
+                console.error("defensivePage: failed to load bonds", res.status);
+            }
+        } catch (error) {
+            console.error("defensivePage: error loading bonds", error);
+        }
+    }
+
     return (
         <div>
-            <h1>
-                Defensive Page
-            </h1>
+            <h1>Defensive Page</h1>
             <StockSearchBar />
-            <ConnectionURL prevPageURL="defensive"/>
+            <ConnectionURL prevPageURL="defensive" />
+            <BondList initialBonds={initialBonds} isDefensive={true} />
         </div>
-
     );
 }
-
-export default DefensivePage;
