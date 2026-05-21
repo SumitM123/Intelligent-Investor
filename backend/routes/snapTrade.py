@@ -736,6 +736,68 @@ def _safe_float(val, default=None):
         return default
 
 
+def _compute_price_dependent_criteria(symbol: str) -> dict:
+    # Recomputed every call (never cached): both metrics hinge on the
+    # current stock price, which is stale the moment we store it.
+    quote = fetch_av("GLOBAL_QUOTE", symbol).get("Global Quote", {})
+    current_price = _safe_float(quote.get("05. price"))
+    if current_price is None:
+        raise HTTPException(status_code=502, detail="Could not retrieve stock price from AlphaVantage")
+
+    overview = fetch_av("COMPANY_OVERVIEW", symbol)
+    market_cap = _safe_float(overview.get("MarketCapitalization"))
+    revenue_ttm = _safe_float(overview.get("RevenueTTM"))
+
+    cash_flow_reports = fetch_av("CASH_FLOW", symbol).get("annualReports", [])
+    latest_cf = cash_flow_reports[0] if cash_flow_reports else {}
+    operating_cf = _safe_float(latest_cf.get("operatingCashflow"))
+    capex = _safe_float(latest_cf.get("capitalExpenditures"), 0.0)
+    fcf = (operating_cf + capex) if operating_cf is not None else None
+
+    if fcf is not None and fcf > 0 and market_cap is not None and market_cap > 0:
+        p_fcf = market_cap / fcf
+        c6_pass = p_fcf <= 25
+    else:
+        p_fcf = None
+        c6_pass = False
+
+    if fcf is not None and fcf > 0 and revenue_ttm is not None and revenue_ttm > 0 and market_cap is not None and market_cap > 0:
+        p_sales = market_cap / revenue_ttm
+        valuation_product = p_fcf * p_sales
+        c7_pass = valuation_product <= 50
+    else:
+        p_sales = None
+        valuation_product = None
+        c7_pass = False
+
+    return {
+        "price_to_fcf": {
+            "pass": c6_pass,
+            "market_cap": market_cap,
+            "fcf": fcf,
+            "p_fcf_ratio": p_fcf,
+            "threshold": 25,
+        },
+        "valuation_combined": {
+            "pass": c7_pass,
+            "p_fcf": p_fcf,
+            "p_sales": p_sales,
+            "product": valuation_product,
+            "threshold": 50,
+        },
+    }
+
+
+_CACHED_CRITERIA_KEYS = (
+    "adequate_size",
+    "current_ratio",
+    "no_earnings_deficits",
+    "shareholder_returns",
+    "earnings_growth_10yr",
+)
+_PRICE_DEPENDENT_KEYS = ("price_to_fcf", "valuation_combined")
+
+
 @router.get("/isLeadingStock")
 def isLeadingStock(
     user_id: Annotated[UUID, Cookie()],
@@ -776,10 +838,17 @@ def isLeadingStock(
         ).first()
 
     if cached is not None:
+        cached_criteria = cached[2] or {}
+        price_dep = _compute_price_dependent_criteria(normalized)
+        merged_criteria = {**cached_criteria, **price_dep}
+        is_leading = all(
+            merged_criteria.get(k, {}).get("pass", False)
+            for k in (*_CACHED_CRITERIA_KEYS, *_PRICE_DEPENDENT_KEYS)
+        )
         return {
             "symbol": cached[0],
-            "is_leading": cached[1],
-            "criteria_details": cached[2],
+            "is_leading": is_leading,
+            "criteria_details": merged_criteria,
             "last_checked": cached[3],
         }
 
@@ -791,27 +860,43 @@ def isLeadingStock(
     if current_price is None:
         raise HTTPException(status_code=502, detail="Could not retrieve stock price from AlphaVantage")
 
-    # Company overview (market cap, book value per share)
+    # Company overview (market cap, trailing-12-month revenue)
     overview = fetch_av("COMPANY_OVERVIEW", normalized)
     market_cap = _safe_float(overview.get("MarketCapitalization"))
-    book_value_per_share = _safe_float(overview.get("BookValue"))
+    revenue_ttm = _safe_float(overview.get("RevenueTTM"))
 
-    # Balance sheet (most recent annual)
+    # Balance sheet (most recent annual — current assets/liabilities for C2)
     annual_balance = fetch_av("BALANCE_SHEET", normalized).get("annualReports", [])
     latest_balance = annual_balance[0] if annual_balance else {}
     current_assets = _safe_float(latest_balance.get("totalCurrentAssets"))
     current_liabilities = _safe_float(latest_balance.get("totalCurrentLiabilities"))
-    long_term_debt = _safe_float(latest_balance.get("longTermDebt"), 0.0)
 
-    # Income statement (last 10 annual net incomes)
+    # Income statement (last 10 annual net incomes and shares outstanding)
     annual_income = fetch_av("INCOME_STATEMENT", normalized).get("annualReports", [])[:10]
     net_incomes = [_safe_float(r.get("netIncome")) for r in annual_income]
     net_incomes = [v for v in net_incomes if v is not None]
+    shares_by_year = []
+    for r in annual_income:
+        yr_str = r.get("fiscalDateEnding", "")[:4]
+        shares = _safe_float(r.get("commonStockSharesOutstanding"))
+        if yr_str and shares is not None:
+            try:
+                shares_by_year.append((int(yr_str), shares))
+            except ValueError:
+                pass
 
-    # EPS & P/E (criteria 6) — computed via shared helper
+    # EPS (criterion 8) — computed via shared helper
     eps_result = get_eps_and_pe(normalized, current_price)
 
-    # Dividends — check for uninterrupted payments over last 20 years
+    # Free Cash Flow (criteria 6 and 7): operating CF minus capex
+    cash_flow_reports = fetch_av("CASH_FLOW", normalized).get("annualReports", [])
+    latest_cf = cash_flow_reports[0] if cash_flow_reports else {}
+    operating_cf = _safe_float(latest_cf.get("operatingCashflow"))
+    capex = _safe_float(latest_cf.get("capitalExpenditures"), 0.0)
+    # AlphaVantage reports capex as a negative number (cash outflow); adding gives FCF
+    fcf = (operating_cf + capex) if operating_cf is not None else None
+
+    # Dividends — check for uninterrupted payments over last 10 years
     dividends = fetch_av("DIVIDENDS", normalized).get("data", [])
     current_year = date.today().year
     div_years = set()
@@ -820,15 +905,15 @@ def isLeadingStock(
         if ex_date and ex_date != "None":
             try:
                 yr = int(ex_date[:4])
-                if current_year - 20 <= yr <= current_year:
+                if current_year - 10 <= yr <= current_year:
                     div_years.add(yr)
             except ValueError:
                 pass
-    required_div_years = set(range(current_year - 19, current_year + 1))
+    required_div_years = set(range(current_year - 9, current_year + 1))
     missing_div_years = sorted(required_div_years - div_years)
 
-    # CPI indexed by year — reused for the $18B threshold (base year: 2026) and the
-    # YoY EPS adjustment in criterion 8. AlphaVantage returns annual CPI newest-first,
+    # CPI indexed by year — used for YoY EPS inflation adjustment in criterion 8.
+    # AlphaVantage returns annual CPI newest-first,
     # so setdefault preserves the most recent reading for any given year.
     cpi_entries = fetch_av("CPI", interval="annual").get("data", [])
     cpi_by_year = {}
@@ -844,26 +929,30 @@ def isLeadingStock(
         cpi_by_year.setdefault(yr, val)
 
     latest_cpi = _safe_float(cpi_entries[0].get("value")) if cpi_entries else None
-    cpi_2026 = cpi_by_year.get(2026, latest_cpi)
-    inflation_factor = (latest_cpi / cpi_2026) if (latest_cpi and cpi_2026 and cpi_2026 > 0) else 1.0
-    market_cap_threshold = 18_000_000_000 * inflation_factor
 
     # --- Evaluate criteria ---
     criteria = {}
 
-    # 1. Market cap ≥ inflation-adjusted $18B
-    c1_pass = market_cap is not None and market_cap >= market_cap_threshold
-    criteria["market_cap"] = {
+    # 1. Adequate Size: Revenue (TTM) ≥ $1B AND Market Cap ≥ $8B
+    _revenue_threshold = 1_000_000_000
+    _mktcap_threshold = 8_000_000_000
+    c1_revenue_pass = revenue_ttm is not None and revenue_ttm >= _revenue_threshold
+    c1_mktcap_pass = market_cap is not None and market_cap >= _mktcap_threshold
+    c1_pass = c1_revenue_pass and c1_mktcap_pass
+    criteria["adequate_size"] = {
         "pass": c1_pass,
-        "value": market_cap,
-        "threshold": market_cap_threshold,
-        "inflation_factor": inflation_factor,
+        "revenue_ttm": revenue_ttm,
+        "revenue_threshold": _revenue_threshold,
+        "revenue_pass": c1_revenue_pass,
+        "market_cap": market_cap,
+        "market_cap_threshold": _mktcap_threshold,
+        "market_cap_pass": c1_mktcap_pass,
     }
 
-    # 2. Current ratio ≥ 2:1
+    # 2. Current ratio ≥ 1.75
     if current_assets is not None and current_liabilities and current_liabilities > 0:
         current_ratio = current_assets / current_liabilities
-        c2_pass = current_ratio >= 2.0
+        c2_pass = current_ratio >= 1.75
     else:
         current_ratio = None
         c2_pass = False
@@ -872,24 +961,11 @@ def isLeadingStock(
         "current_assets": current_assets,
         "current_liabilities": current_liabilities,
         "ratio": current_ratio,
-        "threshold": 2.0,
+        "threshold": 1.75,
     }
 
-    # 3. Long-term debt ≤ net current assets
-    if current_assets is not None and current_liabilities is not None:
-        net_current_assets = current_assets - current_liabilities
-        c3_pass = long_term_debt <= net_current_assets
-    else:
-        net_current_assets = None
-        c3_pass = False
-    criteria["long_term_debt_vs_net_current_assets"] = {
-        "pass": c3_pass,
-        "long_term_debt": long_term_debt,
-        "net_current_assets": net_current_assets,
-    }
-
-    # 4. No earnings deficits in past 10 years
-    deficit_count = sum(1 for v in net_incomes if v <= 0)
+    # 4. No earnings deficits in past 10 years (deficit = strictly negative net income)
+    deficit_count = sum(1 for v in net_incomes if v < 0)
     c4_pass = len(net_incomes) >= 1 and deficit_count == 0
     criteria["no_earnings_deficits"] = {
         "pass": c4_pass,
@@ -897,12 +973,29 @@ def isLeadingStock(
         "deficit_count": deficit_count,
     }
 
-    # 5. Uninterrupted dividends for 20 years
-    c5_pass = len(missing_div_years) == 0
-    criteria["uninterrupted_dividends"] = {
+    # 5. Shareholder returns: uninterrupted dividends for 10 years OR consistent
+    # buybacks (net share-count reduction in 7 of the past 10 years).
+    c5_dividends = len(missing_div_years) == 0
+    buyback_years_count = 0
+    if len(shares_by_year) >= 2:
+        # shares_by_year is newest-first (AlphaVantage ordering)
+        for i in range(len(shares_by_year) - 1):
+            if shares_by_year[i][1] < shares_by_year[i + 1][1]:
+                buyback_years_count += 1
+    c5_buybacks = buyback_years_count >= 7
+    c5_pass = c5_dividends or c5_buybacks
+    criteria["shareholder_returns"] = {
         "pass": c5_pass,
-        "years_covered": len(div_years),
-        "missing_years": missing_div_years,
+        "dividends": {
+            "pass": c5_dividends,
+            "years_covered": len(div_years),
+            "missing_years": missing_div_years,
+        },
+        "buybacks": {
+            "pass": c5_buybacks,
+            "years_with_share_reduction": buyback_years_count,
+            "threshold": 7,
+        },
     }
     
     # 8. EPS growth ≥ 33% over the past 10 years, inflation-adjusted YoY.
@@ -944,33 +1037,46 @@ def isLeadingStock(
         "inflation_adjusted": True,
     }
 
-    # 6. Price ≤ 15× average EPS (3 years)
-    avg_eps = eps_result["avg_eps_3yr"]
-    c6_pass = bool(avg_eps and avg_eps > 0 and current_price <= 15 * avg_eps)
-    criteria["price_to_earnings"] = {
-        "pass": c6_pass,
-        "current_price": current_price,
-        "avg_eps_3yr": avg_eps,
-        "pe_ratio": eps_result["pe_ratio"],
-        "threshold_multiple": 15,
-    }
-
-    # 7. Price ≤ 1.5× book value per share
-    if book_value_per_share and book_value_per_share > 0:
-        price_to_book = current_price / book_value_per_share
-        c7_pass = price_to_book <= 1.5
+    # 6. Price/FCF (market cap / free cash flow) ≤ 25
+    if fcf is not None and fcf > 0 and market_cap is not None and market_cap > 0:
+        p_fcf = market_cap / fcf
+        c6_pass = p_fcf <= 25
     else:
-        price_to_book = None
-        c7_pass = False
-    criteria["price_to_book"] = {
-        "pass": c7_pass,
-        "current_price": current_price,
-        "book_value_per_share": book_value_per_share,
-        "price_to_book_ratio": price_to_book,
-        "threshold": 1.5,
+        p_fcf = None
+        c6_pass = False
+    criteria["price_to_fcf"] = {
+        "pass": c6_pass,
+        "market_cap": market_cap,
+        "fcf": fcf,
+        "p_fcf_ratio": p_fcf,
+        "threshold": 25,
     }
 
-    is_leading = all([c1_pass, c2_pass, c3_pass, c4_pass, c5_pass, c6_pass, c7_pass, c8_pass])
+    # 7. (P/FCF × P/Sales) ≤ 50 — combined valuation check
+    # p_fcf already computed in criterion 6 above
+    if fcf is not None and fcf > 0 and revenue_ttm is not None and revenue_ttm > 0 and market_cap is not None and market_cap > 0:
+        p_sales = market_cap / revenue_ttm
+        valuation_product = p_fcf * p_sales
+        c7_pass = valuation_product <= 50
+    else:
+        p_sales = None
+        valuation_product = None
+        c7_pass = False
+    criteria["valuation_combined"] = {
+        "pass": c7_pass,
+        "p_fcf": p_fcf,
+        "p_sales": p_sales,
+        "product": valuation_product,
+        "threshold": 50,
+    }
+
+    is_leading = all([c1_pass, c2_pass, c4_pass, c5_pass, c6_pass, c7_pass, c8_pass])
+
+    # price_to_fcf and valuation_combined depend on current price, so they're
+    # excluded from the cache and recomputed on every request.
+    cacheable_criteria = {
+        k: v for k, v in criteria.items() if k not in _PRICE_DEPENDENT_KEYS
+    }
 
     # Upsert result into cache table
     with SessionLocal() as session:
@@ -989,7 +1095,7 @@ def isLeadingStock(
                 {
                     "symbol": normalized,
                     "is_leading": is_leading,
-                    "criteria_details": json.dumps(criteria),
+                    "criteria_details": json.dumps(cacheable_criteria),
                 },
             )
             session.commit()
