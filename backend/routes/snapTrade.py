@@ -736,6 +736,68 @@ def _safe_float(val, default=None):
         return default
 
 
+def _compute_price_dependent_criteria(symbol: str) -> dict:
+    # Recomputed every call (never cached): both metrics hinge on the
+    # current stock price, which is stale the moment we store it.
+    quote = fetch_av("GLOBAL_QUOTE", symbol).get("Global Quote", {})
+    current_price = _safe_float(quote.get("05. price"))
+    if current_price is None:
+        raise HTTPException(status_code=502, detail="Could not retrieve stock price from AlphaVantage")
+
+    overview = fetch_av("COMPANY_OVERVIEW", symbol)
+    market_cap = _safe_float(overview.get("MarketCapitalization"))
+    revenue_ttm = _safe_float(overview.get("RevenueTTM"))
+
+    cash_flow_reports = fetch_av("CASH_FLOW", symbol).get("annualReports", [])
+    latest_cf = cash_flow_reports[0] if cash_flow_reports else {}
+    operating_cf = _safe_float(latest_cf.get("operatingCashflow"))
+    capex = _safe_float(latest_cf.get("capitalExpenditures"), 0.0)
+    fcf = (operating_cf + capex) if operating_cf is not None else None
+
+    if fcf is not None and fcf > 0 and market_cap is not None and market_cap > 0:
+        p_fcf = market_cap / fcf
+        c6_pass = p_fcf <= 25
+    else:
+        p_fcf = None
+        c6_pass = False
+
+    if fcf is not None and fcf > 0 and revenue_ttm is not None and revenue_ttm > 0 and market_cap is not None and market_cap > 0:
+        p_sales = market_cap / revenue_ttm
+        valuation_product = p_fcf * p_sales
+        c7_pass = valuation_product <= 50
+    else:
+        p_sales = None
+        valuation_product = None
+        c7_pass = False
+
+    return {
+        "price_to_fcf": {
+            "pass": c6_pass,
+            "market_cap": market_cap,
+            "fcf": fcf,
+            "p_fcf_ratio": p_fcf,
+            "threshold": 25,
+        },
+        "valuation_combined": {
+            "pass": c7_pass,
+            "p_fcf": p_fcf,
+            "p_sales": p_sales,
+            "product": valuation_product,
+            "threshold": 50,
+        },
+    }
+
+
+_CACHED_CRITERIA_KEYS = (
+    "adequate_size",
+    "current_ratio",
+    "no_earnings_deficits",
+    "shareholder_returns",
+    "earnings_growth_10yr",
+)
+_PRICE_DEPENDENT_KEYS = ("price_to_fcf", "valuation_combined")
+
+
 @router.get("/isLeadingStock")
 def isLeadingStock(
     user_id: Annotated[UUID, Cookie()],
@@ -776,10 +838,17 @@ def isLeadingStock(
         ).first()
 
     if cached is not None:
+        cached_criteria = cached[2] or {}
+        price_dep = _compute_price_dependent_criteria(normalized)
+        merged_criteria = {**cached_criteria, **price_dep}
+        is_leading = all(
+            merged_criteria.get(k, {}).get("pass", False)
+            for k in (*_CACHED_CRITERIA_KEYS, *_PRICE_DEPENDENT_KEYS)
+        )
         return {
             "symbol": cached[0],
-            "is_leading": cached[1],
-            "criteria_details": cached[2],
+            "is_leading": is_leading,
+            "criteria_details": merged_criteria,
             "last_checked": cached[3],
         }
 
@@ -1003,6 +1072,12 @@ def isLeadingStock(
 
     is_leading = all([c1_pass, c2_pass, c4_pass, c5_pass, c6_pass, c7_pass, c8_pass])
 
+    # price_to_fcf and valuation_combined depend on current price, so they're
+    # excluded from the cache and recomputed on every request.
+    cacheable_criteria = {
+        k: v for k, v in criteria.items() if k not in _PRICE_DEPENDENT_KEYS
+    }
+
     # Upsert result into cache table
     with SessionLocal() as session:
         try:
@@ -1020,7 +1095,7 @@ def isLeadingStock(
                 {
                     "symbol": normalized,
                     "is_leading": is_leading,
-                    "criteria_details": json.dumps(criteria),
+                    "criteria_details": json.dumps(cacheable_criteria),
                 },
             )
             session.commit()
