@@ -1,7 +1,7 @@
 "use client";
 
 import Script from "next/script";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect } from "react";
 import { passSignInProps } from "@/app/actions";
 declare global {
     interface Window {
@@ -27,37 +27,11 @@ declare global {
     }
 }
 
-const decodeJWT = (token: string) => {
-    const base64Url = token.split(".")[1];
-    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
-    const jsonPayload = decodeURIComponent(
-        atob(base64)
-            .split("")
-            .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
-            .join("")
-    );
-    return JSON.parse(jsonPayload);
-};
-
 const SignInPage = () => {
-    // State variables might not be necessary
-    const [googleID, setGoogleID] = useState(String);
-    const [name, setName] = useState(String);
-    const [email, setEmail] = useState(String);
-    const handleCredentialResponse = useCallback((response: { credential: string }) => {
-        console.log("Encoded JWT ID token:", response.credential);
-        const payload = decodeJWT(response.credential);
-        console.log("Decoded JWT ID token fields:", payload);
-        setGoogleID(payload.sub);
-        setName(payload.name);
-        setEmail(payload.email);
+    const handleCredentialResponse = useCallback(async (response: { credential: string }) => {
         const formData = new FormData();
-        formData.append("Name", payload.name);
-        formData.append("googleID", payload.sub);
-        formData.append("email", payload.email);
-        formData.append("profilePictureURL", payload.picture)
-        passSignInProps(formData);
-        
+        formData.append("credential", response.credential);
+        await passSignInProps(formData);
     }, []);
 
     const initGoogleButton = useCallback(() => {
