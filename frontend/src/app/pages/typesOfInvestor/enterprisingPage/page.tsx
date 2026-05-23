@@ -6,6 +6,7 @@ import BondList, { type BondEntry } from "@/app/component/BondList/BondList";
 export default async function EnterprisingPage() {
     const cookieStore = await cookies();
     const userIdCookie = cookieStore.get("user_id")?.value;
+    const hasSnapTradeUser = !!cookieStore.get("snapTradeUserID")?.value;
     const apiBaseUrl = process.env.INTERNAL_API_BASE ?? "http://backend:8000";
 
     let initialBonds: BondEntry[] = [];
@@ -33,7 +34,7 @@ export default async function EnterprisingPage() {
         <div>
             <h1>Enterprising Page</h1>
             <StockSearchBar />
-            <ConnectionURL prevPageURL="enterprising" />
+            <ConnectionURL prevPageURL="enterprising" hasSnapTradeUser={hasSnapTradeUser} />
             <BondList initialBonds={initialBonds} isDefensive={false} />
         </div>
     );
