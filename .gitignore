@@ -1,6 +1,11 @@
 docker-compose.yml
 docker-compose.dev.yml
+compose-verifying-stock.yml
 projectRunning.txt
 .env
 toDo.txt
 .claude/settings.local.json
+__pycache__/
+playwright-mcp/
+.playwright-mcp/
+screenshots/
