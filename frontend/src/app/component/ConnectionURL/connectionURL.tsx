@@ -1,34 +1,32 @@
 "use client"
-import React, { useEffect } from "react";
-import { useState } from "react";
+import React, { useEffect, useState } from "react";
 import URIButton from "@/app/component/URIButton/uriButton";
-import { prevPageContext, usePrevPageContext } from "@/app/context/prevPageURL";
-// import { useUserContext } from "@/app/context/UserContext";
-// The prevPageURl is the URL to go back to once it's been finished
+
 interface ConnectionURLProps {
     prevPageURL: string;
+    hasSnapTradeUser: boolean;
 }
 
-//MAKE THE ENTIRE BUTTON AS A SEPERATE CLIENT COMPONENT WHERE IT TAKES INTO THE CONTEXT. THIS FILE
-// SHOULD BE A SERVER COMPONENT, SO IT NEEDS TO MAKE REQUEST TO THE BACKEND
-
-function ConnectionURL({ prevPageURL }: ConnectionURLProps) {
+function ConnectionURL({ prevPageURL, hasSnapTradeUser }: ConnectionURLProps) {
     const [uriGenerated, setURIGenerated] = useState<string>("");
+
     async function generateURI() {
-        let data: { redirectURI?: string } | null = null;
         try {
             const apiBase = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
             const res = await fetch(`${apiBase}/api/snapTrade/generateConnectionPortal`, {
                 method: "GET",
-                credentials: "include", // needed if backend reads cookies
+                credentials: "include",
             });
-
-            if (!res.ok) throw new Error(`Request failed: ${res.status}`);
-            data = await res.json();
-            } catch (e) {
-                console.error("Error generating the URI" + (e as Error).message);
-            } 
-        return data?.redirectURI ?? "";
+            if (!res.ok) {
+                console.warn(`generateConnectionPortal failed: ${res.status}`);
+                return "";
+            }
+            const data = (await res.json()) as { redirectURI?: string };
+            return data?.redirectURI ?? "";
+        } catch (e) {
+            console.warn("Error generating the URI: " + (e as Error).message);
+            return "";
+        }
     }
 
     const loadURI = async () => {
@@ -36,13 +34,18 @@ function ConnectionURL({ prevPageURL }: ConnectionURLProps) {
     };
 
     useEffect(() => {
-        void loadURI();    
-    }, []);
+        if (!hasSnapTradeUser) return;
+        void loadURI();
+    }, [hasSnapTradeUser]);
+
+    if (!hasSnapTradeUser) {
+        return <a>Sign in to connect a brokerage</a>;
+    }
     return (
         <div>
             {uriGenerated !== "" && <URIButton uriGenerated={uriGenerated} prevPageURLNav={prevPageURL} onRefresh={loadURI}/>}
             {uriGenerated === "" && <a> Receiving the URI to connect brokerage </a>}
         </div>
     );
-};
+}
 export default ConnectionURL;
