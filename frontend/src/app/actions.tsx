@@ -84,3 +84,13 @@ export async function passSignInProps(formData: FormData) {
     revalidatePath("/");
     redirect("/");
 }
+
+export async function signOutAction() {
+    const cookieStore = await cookies();
+    cookieStore.delete("userName");
+    cookieStore.delete("profilePictureURL");
+    cookieStore.delete("user_id");
+    cookieStore.delete("snapTradeUserID");
+    revalidatePath("/", "layout");
+    redirect("/pages/signIn");
+}
