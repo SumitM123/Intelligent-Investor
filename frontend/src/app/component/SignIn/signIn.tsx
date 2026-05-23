@@ -1,88 +1,123 @@
-'use client'
+'use client';
 import Image from "next/image";
-import { useState, useEffect } from "react";
-import { deleteCookie } from 'cookies-next';
-import { useRouter } from 'next/navigation';
-import styles from './signIn.module.css';
+import { useState, useEffect, useRef, useTransition } from "react";
 import Link from "next/link";
+import { signOutAction } from "@/app/actions";
 
-// THIS FILE ISN'T FOR THE ACTUAL PAGE. IT'S ONLY FOR WHAT NEEDS TO BE DISPLAYED INSIDE THE SIGNIN SECTION OF NAVBAR
-/* 
-    Instead of props, let's do sessionStorage. If you do props, we're going to have to use Server Actions
-
-    SessionStorage:
-        Intially, you're not signed in. So upon going to this page, it'll first look at local storage to find
-        the properties, like name and profilePicture URL. If not there, it'll display just "Sign In". If on
-        "Sign In" and clicks, then it'll take you to /page/signIn. Inside the Sign In page, there will be a 
-        sign in with google option. Once the user signs in with google, I retrive the credentials, like name,
-        and profile picture URL and store these variables in session storage. And then, it'll go back to home page
-        where the NavBar will still be in place, and the state variables will change, displaying the actual 
-        profile picture, and name. If user hovers on the this, and there is a username, then it'll just show 
-        'log out' option, where if the user presses it, then will remove session storage variables, where the
-        new state will be displayed. 
-            - Would not work because the change of sessionStorage key-value pair won't trigger a rerender. External change
-            not internal
-
-        Use Server-Actions:
-            revalidatePath() can be used to bypass the session
-        
-*/
 interface SignedIn {
-    isSignedIn: boolean;
-    profilePicture: string; // it'll be the key of the object stored in the s3 bucket or you can serialize the file by turning it into a base64 encoder
-    userName: string;
+  isSignedIn: boolean;
+  profilePicture: string;
+  userName: string;
 }
 
-export default function SignIn({isSignedIn, profilePicture, userName} : SignedIn) {
-    /*
-    If signed in, and hovered over the component, replace it with sign out. If pressed signed out, 
-    then remove the cookies and change the content of the component as well. 
-    */
-    const router = useRouter();
-    const [stateSignedIn, setStateSignedIn] = useState(isSignedIn);
-    
-    //will trigger at each render
-    useEffect( () => { 
-        setStateSignedIn(isSignedIn);
-    }, [isSignedIn]);
-    
-    const displayName = userName || "Sign In";
+export default function SignIn({ isSignedIn, profilePicture, userName }: SignedIn) {
+  const [stateSignedIn, setStateSignedIn] = useState(isSignedIn);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const wrapRef = useRef<HTMLDivElement>(null);
 
-    const signOut = async () : Promise<void> => {
-        // remove the 'user id' key-value pair inside the cookie store
-        deleteCookie('userName');
-        deleteCookie('profilePictureURL');
-        deleteCookie('user_id');
-        
-        // change the state of signed in to false
-        setStateSignedIn(false);
-        //go to the main page and refresh upon 
-        router.push('/');
-        router.refresh();
+  useEffect(() => setStateSignedIn(isSignedIn), [isSignedIn]);
 
-    }
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMenuOpen(false);
+    window.addEventListener("mousedown", onClick);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onClick);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
 
+  const handleSignOut = () => {
+    setMenuOpen(false);
+    startTransition(async () => {
+      await signOutAction();
+    });
+  };
+
+  if (!stateSignedIn) {
     return (
-        <div>
-            {/* Have a div so that it'll change based on the isSignedIn variable */}
-            {stateSignedIn && 
-            <div className={styles.signedInContainer}>
-                <div className={styles.defaultContent}>
-                    {profilePicture && (
-                        <Image src={profilePicture} alt="User" width={50} height={50} />
-                    )}
-                    <a>{displayName}</a>
-                </div>
-                <button className={styles.signOutButton} onClick={signOut}>
-                    Sign out
-                </button>
-            </div>
-            }
-            {!stateSignedIn && 
-            <div>
-                {/* <a> {displayName} </a> */}
-                <Link href="/pages/signIn"> {displayName} </Link>
-            </div>}
-        </div>
+      <Link
+        href="/pages/signIn"
+        className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-md text-sm font-medium bg-neutral-900 text-white hover:bg-neutral-800 active:scale-[0.98] transition w-full"
+      >
+        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+          <path d="M15 4h3a2 2 0 012 2v12a2 2 0 01-2 2h-3M10 17l5-5-5-5M15 12H3" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        Sign in
+      </Link>
     );
+  }
+
+  const firstName = userName?.split(" ")[0] ?? "User";
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setMenuOpen((o) => !o)}
+        className="flex items-center gap-2.5 px-2 py-2 rounded-md hover:bg-black/[0.04] w-full text-left transition"
+      >
+        {profilePicture ? (
+          <Image
+            src={profilePicture}
+            alt=""
+            width={32}
+            height={32}
+            className="rounded-full ring-1 ring-[var(--border)]"
+          />
+        ) : (
+          <div className="w-8 h-8 rounded-full bg-[var(--accent)] grid place-items-center text-white text-xs font-semibold ring-1 ring-[var(--border)]">
+            {userName?.[0]?.toUpperCase() ?? "U"}
+          </div>
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium truncate leading-tight">{firstName}</p>
+          <p className="text-[11px] text-[var(--muted)] truncate leading-tight mt-0.5">
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--pass)] mr-1.5 align-middle" />
+            Connected
+          </p>
+        </div>
+        <svg
+          className={`w-4 h-4 text-[var(--muted)] transition ${menuOpen ? "rotate-180" : ""}`}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
+          <path d="M6 9l6 6 6-6" strokeLinecap="round" />
+        </svg>
+      </button>
+
+      {menuOpen && (
+        <div className="absolute bottom-full left-0 right-0 mb-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] shadow-lg p-1 z-50 fade-up">
+          <div className="px-3 py-2 border-b border-[var(--border)] mb-1">
+            <p className="text-sm font-medium truncate">{userName}</p>
+            <p className="text-[11px] text-[var(--muted)] truncate">Signed in via Google</p>
+          </div>
+          <button
+            onClick={handleSignOut}
+            disabled={isPending}
+            className="flex items-center gap-2 px-3 py-2 rounded-md text-sm w-full text-left hover:bg-[var(--fail-soft)] hover:text-[var(--fail)] text-[var(--foreground)] transition disabled:opacity-60 disabled:cursor-wait"
+          >
+            {isPending ? (
+              <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" strokeOpacity="0.3" />
+                <path d="M22 12a10 10 0 00-10-10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+                <path d="M9 4H6a2 2 0 00-2 2v12a2 2 0 002 2h3M14 17l5-5-5-5M19 12H7" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            )}
+            {isPending ? "Signing out…" : "Sign out"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
