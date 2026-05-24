@@ -744,7 +744,7 @@ def _compute_price_dependent_criteria(symbol: str) -> dict:
     if current_price is None:
         raise HTTPException(status_code=502, detail="Could not retrieve stock price from AlphaVantage")
 
-    overview = fetch_av("COMPANY_OVERVIEW", symbol)
+    overview = fetch_av("OVERVIEW", symbol)
     market_cap = _safe_float(overview.get("MarketCapitalization"))
     revenue_ttm = _safe_float(overview.get("RevenueTTM"))
 
@@ -861,7 +861,7 @@ def isLeadingStock(
         raise HTTPException(status_code=502, detail="Could not retrieve stock price from AlphaVantage")
 
     # Company overview (market cap, trailing-12-month revenue)
-    overview = fetch_av("COMPANY_OVERVIEW", normalized)
+    overview = fetch_av("OVERVIEW", normalized)
     market_cap = _safe_float(overview.get("MarketCapitalization"))
     revenue_ttm = _safe_float(overview.get("RevenueTTM"))
 
@@ -896,21 +896,53 @@ def isLeadingStock(
     # AlphaVantage reports capex as a negative number (cash outflow); adding gives FCF
     fcf = (operating_cf + capex) if operating_cf is not None else None
 
-    # Dividends — check for uninterrupted payments over last 10 years
+    # Dividends — infer payment frequency from the two most recent entries,
+    # then walk backwards in frequency-sized steps for 10 years; stop on the
+    # first month with no payment.
     dividends = fetch_av("DIVIDENDS", normalized).get("data", [])
-    current_year = date.today().year
-    div_years = set()
+
+    parsed_divs = []
     for d in dividends:
         ex_date = d.get("ex_dividend_date", "")
         if ex_date and ex_date != "None":
             try:
-                yr = int(ex_date[:4])
-                if current_year - 10 <= yr <= current_year:
-                    div_years.add(yr)
+                parsed_divs.append(date.fromisoformat(ex_date))
             except ValueError:
                 pass
-    required_div_years = set(range(current_year - 9, current_year + 1))
-    missing_div_years = sorted(required_div_years - div_years)
+    parsed_divs.sort(reverse=True)  # newest-first
+
+    div_frequency_months = None
+    if len(parsed_divs) >= 2:
+        delta_days = (parsed_divs[0] - parsed_divs[1]).days
+        if delta_days <= 45:
+            div_frequency_months = 1    # monthly
+        elif delta_days <= 105:
+            div_frequency_months = 3    # quarterly
+        elif delta_days <= 210:
+            div_frequency_months = 6    # semi-annual
+        else:
+            div_frequency_months = 12   # annual
+
+    div_year_months = {(d.year, d.month) for d in parsed_divs}
+
+    def _sub_months(yr, mo, n):
+        total = yr * 12 + mo - 1 - n
+        y, m = divmod(total, 12)
+        return y, m + 1
+
+    today = date.today()
+    cutoff = (today.year - 10, today.month)
+    missing_div_periods = []
+    c5_dividends = False
+    if div_frequency_months is not None and parsed_divs:
+        exp_yr, exp_mo = parsed_divs[0].year, parsed_divs[0].month
+        c5_dividends = True
+        while (exp_yr, exp_mo) >= cutoff:
+            if (exp_yr, exp_mo) not in div_year_months:
+                missing_div_periods.append(f"{exp_yr}-{exp_mo:02d}")
+                c5_dividends = False
+                break
+            exp_yr, exp_mo = _sub_months(exp_yr, exp_mo, div_frequency_months)
 
     # CPI indexed by year — used for YoY EPS inflation adjustment in criterion 8.
     # AlphaVantage returns annual CPI newest-first,
@@ -975,7 +1007,6 @@ def isLeadingStock(
 
     # 5. Shareholder returns: uninterrupted dividends for 10 years OR consistent
     # buybacks (net share-count reduction in 7 of the past 10 years).
-    c5_dividends = len(missing_div_years) == 0
     buyback_years_count = 0
     if len(shares_by_year) >= 2:
         # shares_by_year is newest-first (AlphaVantage ordering)
@@ -988,8 +1019,8 @@ def isLeadingStock(
         "pass": c5_pass,
         "dividends": {
             "pass": c5_dividends,
-            "years_covered": len(div_years),
-            "missing_years": missing_div_years,
+            "frequency_months": div_frequency_months,
+            "missing_periods": missing_div_periods,
         },
         "buybacks": {
             "pass": c5_buybacks,
