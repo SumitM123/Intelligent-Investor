@@ -305,8 +305,8 @@ def get_or_fetch_oas_buckets(session: Session, fred_api_key: str) -> Optional[di
             return None
         raw_percent[key] = value
 
-    # FRED OAS values are in percentage points (e.g. 0.83 = 0.83% = 83 bps).
-    values_bps = {k: v * 100.0 for k, v in raw_percent.items()}
+    # FRED ICE BofA OAS series are already in basis points (e.g. 83 = 83 bps).
+    values_bps = {k: v for k, v in raw_percent.items()}
 
     try:
         session.execute(
