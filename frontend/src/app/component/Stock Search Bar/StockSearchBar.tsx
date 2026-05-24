@@ -21,11 +21,18 @@ export default function StockSearchBar({ onSubmit, submitting = false }: StockSe
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const submitSelected = () => {
+  const submitSymbol = (raw: string) => {
     if (!onSubmit) return;
-    const symbol = (stocks[activeIdx]?.symbol ?? searchItem).trim().toUpperCase();
+    const symbol = raw.trim().toUpperCase();
     if (!symbol) return;
+    setSearchItem(symbol);
+    setStocks([]);
+    inputRef.current?.blur();
     onSubmit(symbol);
+  };
+
+  const submitSelected = () => {
+    submitSymbol(stocks[activeIdx]?.symbol ?? searchItem);
   };
 
   // Cmd+K focuses the input
@@ -58,7 +65,7 @@ export default function StockSearchBar({ onSubmit, submitting = false }: StockSe
       const americanStocks: AlphaVantageMatch[] = [];
       for (const item of arrJSON["bestMatches"]) {
         if (item["8. currency"] === "USD") americanStocks.push(item);
-        if (americanStocks.length >= 6) break;
+        if (americanStocks.length >= 5) break;
       }
       setStocks(
         americanStocks.map((m) => ({
@@ -184,6 +191,7 @@ export default function StockSearchBar({ onSubmit, submitting = false }: StockSe
               aria-selected={i === activeIdx}
               onMouseDown={(e) => e.preventDefault()}
               onMouseEnter={() => setActiveIdx(i)}
+              onClick={() => submitSymbol(s.symbol)}
               className={`flex items-center justify-between gap-3 px-3.5 py-2.5 cursor-pointer border-l-2 transition ${
                 i === activeIdx
                   ? "bg-[color-mix(in_oklch,var(--accent)_5%,transparent)] border-l-[var(--accent)]"
