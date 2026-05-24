@@ -751,8 +751,8 @@ def _compute_price_dependent_criteria(symbol: str) -> dict:
     cash_flow_reports = fetch_av("CASH_FLOW", symbol).get("annualReports", [])
     latest_cf = cash_flow_reports[0] if cash_flow_reports else {}
     operating_cf = _safe_float(latest_cf.get("operatingCashflow"))
-    capex = _safe_float(latest_cf.get("capitalExpenditures"), 0.0)
-    fcf = (operating_cf + capex) if operating_cf is not None else None
+    capex = _safe_float(latest_cf.get("capitalExpenditures"))
+    fcf = (operating_cf - capex) if (operating_cf is not None and capex is not None) else None
 
     if fcf is not None and fcf > 0 and market_cap is not None and market_cap > 0:
         p_fcf = market_cap / fcf
@@ -802,8 +802,9 @@ _PRICE_DEPENDENT_KEYS = ("price_to_fcf", "valuation_combined")
 def isLeadingStock(
     user_id: Annotated[UUID, Cookie()],
     symbol: str,
+    allCriteria: bool = False,
 ):
-    
+
     with SessionLocal() as session:
         user_row = session.execute(
             text("SELECT 1 FROM users_id WHERE user_id = :user_id LIMIT 1"),
@@ -845,10 +846,16 @@ def isLeadingStock(
             merged_criteria.get(k, {}).get("pass", False)
             for k in (*_CACHED_CRITERIA_KEYS, *_PRICE_DEPENDENT_KEYS)
         )
+        if allCriteria:
+            return {
+                "symbol": cached[0],
+                "is_leading": is_leading,
+                "criteria_details": merged_criteria,
+                "last_checked": cached[3],
+            }
         return {
             "symbol": cached[0],
             "is_leading": is_leading,
-            "criteria_details": merged_criteria,
             "last_checked": cached[3],
         }
 
@@ -892,9 +899,8 @@ def isLeadingStock(
     cash_flow_reports = fetch_av("CASH_FLOW", normalized).get("annualReports", [])
     latest_cf = cash_flow_reports[0] if cash_flow_reports else {}
     operating_cf = _safe_float(latest_cf.get("operatingCashflow"))
-    capex = _safe_float(latest_cf.get("capitalExpenditures"), 0.0)
-    # AlphaVantage reports capex as a negative number (cash outflow); adding gives FCF
-    fcf = (operating_cf + capex) if operating_cf is not None else None
+    capex = _safe_float(latest_cf.get("capitalExpenditures"))
+    fcf = (operating_cf - capex) if (operating_cf is not None and capex is not None) else None
 
     # Dividends — infer payment frequency from the two most recent entries,
     # then walk backwards in frequency-sized steps for 10 years; stop on the
@@ -1134,8 +1140,13 @@ def isLeadingStock(
             session.rollback()
             raise
 
+    if allCriteria:
+        return {
+            "symbol": normalized,
+            "is_leading": is_leading,
+            "criteria_details": criteria,
+        }
     return {
         "symbol": normalized,
         "is_leading": is_leading,
-        "criteria_details": criteria,
     }
