@@ -8,13 +8,25 @@ type AlphaVantageMatch = {
   "8. currency": string;
 };
 
-export default function StockSearchBar() {
+interface StockSearchBarProps {
+  onSubmit?: (symbol: string) => void;
+  submitting?: boolean;
+}
+
+export default function StockSearchBar({ onSubmit, submitting = false }: StockSearchBarProps = {}) {
   const [stocks, setStocks] = useState<StockMatch[]>([]);
   const [searchItem, setSearchItem] = useState("");
   const [focused, setFocused] = useState(false);
   const [activeIdx, setActiveIdx] = useState(0);
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const submitSelected = () => {
+    if (!onSubmit) return;
+    const symbol = (stocks[activeIdx]?.symbol ?? searchItem).trim().toUpperCase();
+    if (!symbol) return;
+    onSubmit(symbol);
+  };
 
   // Cmd+K focuses the input
   useEffect(() => {
@@ -78,6 +90,17 @@ export default function StockSearchBar() {
   const showDropdown = focused && searchItem.trim() !== "" && (stocks.length > 0 || loading);
 
   const handleKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (onSubmit) {
+        submitSelected();
+      } else if (stocks.length > 0) {
+        // Selection is illustrative for now — the navigation target is not wired.
+        const sel = stocks[activeIdx];
+        if (sel) console.log("Selected", sel.symbol);
+      }
+      return;
+    }
     if (stocks.length === 0) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -85,18 +108,14 @@ export default function StockSearchBar() {
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setActiveIdx((i) => Math.max(i - 1, 0));
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      // Selection is illustrative for now — the navigation target is not wired.
-      const sel = stocks[activeIdx];
-      if (sel) console.log("Selected", sel.symbol);
     }
   };
 
   return (
     <div className="relative">
+      <div className="flex items-stretch gap-2">
       <div
-        className={`flex items-center gap-3 px-3.5 py-2.5 rounded-lg border bg-[var(--background)] transition ${
+        className={`flex-1 flex items-center gap-3 px-3.5 py-2.5 rounded-lg border bg-[var(--background)] transition ${
           focused
             ? "border-[var(--accent)] ring-2 ring-[color-mix(in_oklch,var(--accent)_15%,transparent)]"
             : "border-[var(--border)] hover:border-[var(--border-strong)]"
@@ -133,6 +152,18 @@ export default function StockSearchBar() {
         <kbd className="hidden md:inline-flex items-center px-1.5 py-0.5 rounded border border-[var(--border)] text-[10px] font-mono text-[var(--muted)]">
           ⌘K
         </kbd>
+      </div>
+      {onSubmit && (
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={submitSelected}
+          disabled={submitting || !searchItem.trim()}
+          className="px-4 rounded-lg border border-[var(--accent)] bg-[var(--accent)] text-white text-sm font-semibold tracking-tight transition hover:bg-[var(--accent-strong)] disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {submitting ? "Screening…" : "Screen"}
+        </button>
+      )}
       </div>
 
       {showDropdown && (
