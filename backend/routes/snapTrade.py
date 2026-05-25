@@ -15,6 +15,7 @@ from datetime import datetime, timezone, timedelta, date
 from zoneinfo import ZoneInfo
 import re
 import json
+import time
 from frequenty_used_methods import fetch_av, get_eps_and_pe
 
 router = APIRouter(prefix="/api/snapTrade")
@@ -861,6 +862,10 @@ def isLeadingStock(
 
     # --- Cache miss: fetch from AlphaVantage and evaluate all 7 criteria ---
 
+    # AlphaVantage free tier allows 5 requests/min. Track the moment of the
+    # first call so we can throttle before the 6th call below.
+    av_window_start = time.monotonic()
+
     # Current price
     quote = fetch_av("GLOBAL_QUOTE", normalized).get("Global Quote", {})
     current_price = _safe_float(quote.get("05. price"))
@@ -895,7 +900,13 @@ def isLeadingStock(
     # EPS (criterion 8) — computed via shared helper
     eps_result = get_eps_and_pe(normalized, current_price)
 
-    # Free Cash Flow (criteria 6 and 7): operating CF minus capex
+    # Free Cash Flow (criteria 6 and 7): operating CF minus capex.
+    # CASH_FLOW is the 6th AlphaVantage call — throttle to stay under the
+    # 5 requests/minute free-tier limit. Wait until 61s have elapsed since
+    # the first call before continuing.
+    elapsed = time.monotonic() - av_window_start
+    if elapsed < 61:
+        time.sleep(61 - elapsed)
     cash_flow_reports = fetch_av("CASH_FLOW", normalized).get("annualReports", [])
     latest_cf = cash_flow_reports[0] if cash_flow_reports else {}
     operating_cf = _safe_float(latest_cf.get("operatingCashflow"))
