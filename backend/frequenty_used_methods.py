@@ -5,16 +5,38 @@ from sqlalchemy import text
 from uuid import UUID
 import httpx
 import os
+import time
 from typing import Optional
 
 _AV_BASE = "https://www.alphavantage.co/query"
 
+# TEMPORARY: per-key throttle. Tracks the monotonic timestamp of the last
+# successful request issued under each AlphaVantage API key, then blocks the
+# next request on the same key until _MIN_GAP_SECONDS have elapsed.
+_LAST_AV_CALL_BY_KEY: dict[str, float] = {}
+_MIN_GAP_SECONDS = 60.0
+
+'''
+    Instead of making a wait-time, let's create new API keys for isleading stock and then based on which key was used last time, we can iterate through the keys so that the
+    next key is used. Bypassing the wait-time needed. 
+'''
 
 def fetch_av(function: str, symbol: Optional[str] = None, **kwargs) -> dict:
-    params = {"function": function, "apikey": os.environ["ALPHA_VANTAGE_API_LEADING_STOCK"]}
+    api_key = os.environ["ALPHA_VANTAGE_API_LEADING_STOCK"]
+    params = {"function": function, "apikey": api_key}
     if symbol:
         params["symbol"] = symbol
     params.update(kwargs)
+
+    last = _LAST_AV_CALL_BY_KEY.get(api_key)
+    if last is not None:
+        gap = time.monotonic() - last
+        if gap < _MIN_GAP_SECONDS:
+            wait = _MIN_GAP_SECONDS - gap
+            print(f"[AV THROTTLE] waiting {wait:.1f}s before {function} (key={api_key[:6]}…)", flush=True)
+            time.sleep(wait)
+    _LAST_AV_CALL_BY_KEY[api_key] = time.monotonic()
+
     print(f"[AV REQ] function={function} symbol={symbol} kwargs={kwargs}", flush=True)
     try:
         resp = httpx.get(_AV_BASE, params=params, timeout=20)
