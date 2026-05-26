@@ -955,13 +955,14 @@ def isLeadingStock(
     c5_dividends = False
     if div_frequency_months is not None and parsed_divs:
         exp_yr, exp_mo = parsed_divs[0].year, parsed_divs[0].month
-        while (exp_yr, exp_mo) >= cutoff:
-            if (exp_yr, exp_mo) not in div_year_months:
-                missing_div_periods.append(f"{exp_yr}-{exp_mo:02d}")
-                c5_dividends = False
-                break
-            exp_yr, exp_mo = _sub_months(exp_yr, exp_mo, div_frequency_months)
-        c5_dividends = True
+        if (exp_yr, exp_mo) >= cutoff:
+            while (exp_yr, exp_mo) >= cutoff:
+                if (exp_yr, exp_mo) not in div_year_months:
+                    missing_div_periods.append(f"{exp_yr}-{exp_mo:02d}")
+                    break
+                exp_yr, exp_mo = _sub_months(exp_yr, exp_mo, div_frequency_months)
+            else:
+                c5_dividends = True
 
     # CPI indexed by year — used for YoY EPS inflation adjustment in criterion 8.
     # AlphaVantage returns annual CPI newest-first,
@@ -1017,7 +1018,7 @@ def isLeadingStock(
 
     # 4. No earnings deficits in past 10 years (deficit = strictly negative net income)
     deficit_count = sum(1 for v in net_incomes if v < 0)
-    c4_pass = len(net_incomes) >= 7 and deficit_count == 0
+    c4_pass = len(net_incomes) >= 10 and deficit_count == 0
     criteria["no_earnings_deficits"] = {
         "pass": c4_pass,
         "years_checked": len(net_incomes),
