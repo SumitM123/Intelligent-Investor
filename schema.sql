@@ -63,4 +63,14 @@ CREATE TABLE IF NOT EXISTS leading_stock_analysis (
     last_checked     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Per-user bond holdings, partitioned by investor type (defensive vs enterprising).
+-- Composite PK matches ON CONFLICT (user_id, is_defensive) in bonds.py upsert.
+CREATE TABLE IF NOT EXISTS bonds_table (
+    user_id      UUID NOT NULL REFERENCES users_id(user_id) ON DELETE CASCADE,
+    is_defensive BOOLEAN NOT NULL,
+    bonds        JSONB NOT NULL DEFAULT '[]'::jsonb,
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, is_defensive)
+);
+
 COMMIT;
