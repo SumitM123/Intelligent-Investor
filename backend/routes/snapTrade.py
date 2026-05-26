@@ -798,7 +798,19 @@ _CACHED_CRITERIA_KEYS = (
 )
 _PRICE_DEPENDENT_KEYS = ("price_to_fcf", "valuation_combined")
 
-
+'''
+    Things to work on for this route:
+        1) Can potentially make this faster, especially when the periodic change time is passed. 
+            - For the criteria that is true, and can't use the cached values because of relevance is exceeded, only search through the criteria 
+            that weren't passed, and then look through the entire list of data if not passed. If some criteria is passed, then instead of looking
+            through the entire list, what I want you to do is that just compare the new data for each of the criteria, and if that new data passed,
+            then keep as passed. Otherwise, turn it to false.
+                Ex: dividend = true. So C5 is passed. Instead of looking over the entire list of the past 10 years, just cross check that the current 
+                dividend payment got payed at the right time relative to the payment of the last payment. If checks out, remain as true. Otherwise, 
+                switch to false. And then store the last faulty date for dividends inside a table. This table can be used to check if it's been 10 years
+                since the next update with the last faulty date. 
+        2) Right now, the updates are relative to when a new stock is added. Instead, make it relative to when financial statements are reported
+'''
 @router.get("/isLeadingStock")
 def isLeadingStock(
     user_id: Annotated[UUID, Cookie()],
@@ -924,43 +936,26 @@ def isLeadingStock(
                 parsed_divs.append(date.fromisoformat(ex_date))
             except ValueError:
                 pass
-    # parsed_divs.sort(reverse=True)  # newest-first
-    '''
-        WORK ON THIS. MAYBE STORE IT IN DATABASE ON FREQUENCY SO YOU DON'T ALWAYS HAVE TO COMPUTE THE DIVIDENDS. IF DIVIDENDS IS TRUE, AND 
-        ANOTHER ONE PAID ON TIME, THEN REMAIN TRUE. DON'T GOTTA CHECK ALL THE WAY BACK. IF DIVIDEND FALSE, THEN MIGHT HAVE TO CHECK ALL THE WAY
-        BACK 
-    '''
-    div_frequency_months = None
+    parsed_divs.sort(reverse=True)  # newest-first
+
+    div_interval_days = None
     if len(parsed_divs) >= 2:
-        delta_days = (parsed_divs[0] - parsed_divs[1]).days
-        if delta_days <= 45:
-            div_frequency_months = 1    # monthly
-        elif delta_days <= 105:
-            div_frequency_months = 3    # quarterly
-        elif delta_days <= 210:
-            div_frequency_months = 6    # semi-annual
-        else:
-            div_frequency_months = 12   # annual
+        div_interval_days = (parsed_divs[0] - parsed_divs[1]).days
 
     div_year_months = {(d.year, d.month) for d in parsed_divs}
-
-    def _sub_months(yr, mo, n):
-        total = yr * 12 + mo - 1 - n
-        y, m = divmod(total, 12)
-        return y, m + 1
 
     today = date.today()
     cutoff = (today.year - 10, today.month)
     missing_div_periods = []
     c5_dividends = False
-    if div_frequency_months is not None and parsed_divs:
-        exp_yr, exp_mo = parsed_divs[0].year, parsed_divs[0].month
-        if (exp_yr, exp_mo) >= cutoff:
-            while (exp_yr, exp_mo) >= cutoff:
-                if (exp_yr, exp_mo) not in div_year_months:
-                    missing_div_periods.append(f"{exp_yr}-{exp_mo:02d}")
+    if div_interval_days is not None and div_interval_days > 0 and parsed_divs:
+        expected = parsed_divs[0]
+        if (expected.year, expected.month) >= cutoff:
+            while (expected.year, expected.month) >= cutoff:
+                if (expected.year, expected.month) not in div_year_months:
+                    missing_div_periods.append(f"{expected.year}-{expected.month:02d}")
                     break
-                exp_yr, exp_mo = _sub_months(exp_yr, exp_mo, div_frequency_months)
+                expected = expected - timedelta(days=div_interval_days)
             else:
                 c5_dividends = True
 
@@ -1039,7 +1034,7 @@ def isLeadingStock(
         "pass": c5_pass,
         "dividends": {
             "pass": c5_dividends,
-            "frequency_months": div_frequency_months,
+            "interval_days": div_interval_days,
             "missing_periods": missing_div_periods,
         },
         "buybacks": {
