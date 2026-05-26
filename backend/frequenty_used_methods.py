@@ -15,14 +15,18 @@ def fetch_av(function: str, symbol: Optional[str] = None, **kwargs) -> dict:
     if symbol:
         params["symbol"] = symbol
     params.update(kwargs)
+    print(f"[AV REQ] function={function} symbol={symbol} kwargs={kwargs}", flush=True)
     try:
         resp = httpx.get(_AV_BASE, params=params, timeout=20)
         resp.raise_for_status()
     except httpx.HTTPError as exc:
+        print(f"[AV HTTP-ERR] function={function} symbol={symbol} exc={exc}", flush=True)
         raise HTTPException(status_code=502, detail=f"AlphaVantage request failed: {exc}")
     data = resp.json()
     if "Information" in data or "Note" in data:
-        raise HTTPException(status_code=429, detail="AlphaVantage rate limit reached")
+        msg = data.get("Information") or data.get("Note")
+        print(f"[AV 429] function={function} symbol={symbol} body={msg}", flush=True)
+        raise HTTPException(status_code=429, detail=f"AlphaVantage rate limit reached: {msg}")
     if "Error Message" in data:
         raise HTTPException(status_code=502, detail=f"AlphaVantage error: {data['Error Message']}")
     return data
