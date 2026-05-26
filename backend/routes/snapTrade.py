@@ -818,7 +818,7 @@ def isLeadingStock(
         )
 
     normalized = symbol.strip().upper()
-    if not re.fullmatch(r"[A-Z0-9][A-Z0-9.\-]{0,24}", normalized):
+    if not re.fullmatch(r"[A-Z][A-Z0-9]{0,4}(\.[A-Z]{1,2})?", normalized):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid stock symbol",
@@ -852,12 +852,10 @@ def isLeadingStock(
                 "symbol": cached[0],
                 "is_leading": is_leading,
                 "criteria_details": merged_criteria,
-                "last_checked": cached[3],
             }
         return {
             "symbol": cached[0],
             "is_leading": is_leading,
-            "last_checked": cached[3],
         }
 
     # --- Cache miss: fetch from AlphaVantage and evaluate all 7 criteria ---
@@ -926,8 +924,12 @@ def isLeadingStock(
                 parsed_divs.append(date.fromisoformat(ex_date))
             except ValueError:
                 pass
-    parsed_divs.sort(reverse=True)  # newest-first
-
+    # parsed_divs.sort(reverse=True)  # newest-first
+    '''
+        WORK ON THIS. MAYBE STORE IT IN DATABASE ON FREQUENCY SO YOU DON'T ALWAYS HAVE TO COMPUTE THE DIVIDENDS. IF DIVIDENDS IS TRUE, AND 
+        ANOTHER ONE PAID ON TIME, THEN REMAIN TRUE. DON'T GOTTA CHECK ALL THE WAY BACK. IF DIVIDEND FALSE, THEN MIGHT HAVE TO CHECK ALL THE WAY
+        BACK 
+    '''
     div_frequency_months = None
     if len(parsed_divs) >= 2:
         delta_days = (parsed_divs[0] - parsed_divs[1]).days
@@ -1015,7 +1017,7 @@ def isLeadingStock(
 
     # 4. No earnings deficits in past 10 years (deficit = strictly negative net income)
     deficit_count = sum(1 for v in net_incomes if v < 0)
-    c4_pass = len(net_incomes) >= 1 and deficit_count == 0
+    c4_pass = len(net_incomes) >= 7 and deficit_count == 0
     criteria["no_earnings_deficits"] = {
         "pass": c4_pass,
         "years_checked": len(net_incomes),
@@ -1060,7 +1062,7 @@ def isLeadingStock(
             return eps_val
         return eps_val * (latest_cpi / cpi_for_year)
 
-    if len(eps_10yr_dated) >= 6:
+    if len(eps_10yr_dated) >= 8:
         adjusted_recent = [_adjust_eps(yr, val) for yr, val in eps_10yr_dated[:3]]
         adjusted_early = [_adjust_eps(yr, val) for yr, val in eps_10yr_dated[-3:]]
         avg_recent_eps = sum(adjusted_recent) / 3
@@ -1083,6 +1085,7 @@ def isLeadingStock(
         "growth_pct": earnings_growth_pct,
         "threshold_pct": 33,
         "inflation_adjusted": True,
+        "years_covered": len(eps_10yr_dated),
     }
 
     # 6. Price/FCF (market cap / free cash flow) ≤ 25
