@@ -1125,6 +1125,10 @@ def isLeadingStock(
     cacheable_criteria = {
         k: v for k, v in criteria.items() if k not in _PRICE_DEPENDENT_KEYS
     }
+    # The stored is_leading reflects only price-independent criteria (C1, C2, C4, C5, C8).
+    # C6 and C7 are price-dependent and recomputed on every request, so storing a value
+    # that includes them would be stale the moment the stock price moves.
+    is_leading_cached = all([c1_pass, c2_pass, c4_pass, c5_pass, c8_pass])
 
     # Upsert result into cache table
     with SessionLocal() as session:
@@ -1142,7 +1146,7 @@ def isLeadingStock(
                 ),
                 {
                     "symbol": normalized,
-                    "is_leading": is_leading,
+                    "is_leading": is_leading_cached,
                     "criteria_details": json.dumps(cacheable_criteria),
                 },
             )

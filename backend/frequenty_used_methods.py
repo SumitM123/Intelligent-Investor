@@ -11,7 +11,7 @@ _AV_BASE = "https://www.alphavantage.co/query"
 
 
 def fetch_av(function: str, symbol: Optional[str] = None, **kwargs) -> dict:
-    params = {"function": function, "apikey": os.environ["ALPHA_VANTAGE_API"]}
+    params = {"function": function, "apikey": os.environ["ALPHA_VANTAGE_API_LEADING_STOCK"]}
     if symbol:
         params["symbol"] = symbol
     params.update(kwargs)
@@ -23,6 +23,8 @@ def fetch_av(function: str, symbol: Optional[str] = None, **kwargs) -> dict:
     data = resp.json()
     if "Information" in data or "Note" in data:
         raise HTTPException(status_code=429, detail="AlphaVantage rate limit reached")
+    if "Error Message" in data:
+        raise HTTPException(status_code=502, detail=f"AlphaVantage error: {data['Error Message']}")
     return data
 
 

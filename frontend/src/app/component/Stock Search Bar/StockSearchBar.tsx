@@ -52,7 +52,7 @@ export default function StockSearchBar({ onSubmit, submitting = false }: StockSe
     setLoading(true);
     try {
       const apiKey =
-        process.env.NEXT_PUBLIC_ALPHA_VANTAGE_API ?? process.env.ALPHA_VANTAGE_API ?? "";
+        process.env.NEXT_PUBLIC_ALPHA_VANTAGE_API_SEARCH_BAR ?? process.env.ALPHA_VANTAGE_API_SEARCH_BAR ?? "";
       const url = `https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords=${encodeURIComponent(
         q,
       )}&apikey=${apiKey}&datatype=json`;
