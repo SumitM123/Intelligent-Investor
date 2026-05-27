@@ -942,17 +942,16 @@ def isLeadingStock(
     if len(parsed_divs) >= 2:
         div_interval_days = (parsed_divs[0] - parsed_divs[1]).days
 
-    div_year_months = {(d.year, d.month) for d in parsed_divs}
-
     today = date.today()
     cutoff = (today.year - 10, today.month)
     missing_div_periods = []
     c5_dividends = False
+    _DIV_TOLERANCE_DAYS = 30
     if div_interval_days is not None and div_interval_days > 0 and parsed_divs:
         expected = parsed_divs[0]
         if (expected.year, expected.month) >= cutoff:
             while (expected.year, expected.month) >= cutoff:
-                if (expected.year, expected.month) not in div_year_months:
+                if not any(abs((expected - d).days) <= _DIV_TOLERANCE_DAYS for d in parsed_divs):
                     missing_div_periods.append(f"{expected.year}-{expected.month:02d}")
                     break
                 expected = expected - timedelta(days=div_interval_days)
