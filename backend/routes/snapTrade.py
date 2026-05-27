@@ -887,18 +887,16 @@ def isLeadingStock(
     market_cap = _safe_float(overview.get("MarketCapitalization"))
     revenue_ttm = _safe_float(overview.get("RevenueTTM"))
 
-    # Balance sheet (most recent annual — current assets/liabilities for C2)
+    # Balance sheet (most recent annual — current assets/liabilities for C2,
+    # and last 10 years of shares outstanding for the C5 buybacks check).
+    # AlphaVantage stopped populating commonStockSharesOutstanding in
+    # INCOME_STATEMENT responses, so we source it from BALANCE_SHEET instead.
     annual_balance = fetch_av("BALANCE_SHEET", normalized).get("annualReports", [])
     latest_balance = annual_balance[0] if annual_balance else {}
     current_assets = _safe_float(latest_balance.get("totalCurrentAssets"))
     current_liabilities = _safe_float(latest_balance.get("totalCurrentLiabilities"))
-
-    # Income statement (last 10 annual net incomes and shares outstanding)
-    annual_income = fetch_av("INCOME_STATEMENT", normalized).get("annualReports", [])[:10]
-    net_incomes = [_safe_float(r.get("netIncome")) for r in annual_income]
-    net_incomes = [v for v in net_incomes if v is not None]
     shares_by_year = []
-    for r in annual_income:
+    for r in annual_balance[:10]:
         yr_str = r.get("fiscalDateEnding", "")[:4]
         shares = _safe_float(r.get("commonStockSharesOutstanding"))
         if yr_str and shares is not None:
@@ -906,6 +904,11 @@ def isLeadingStock(
                 shares_by_year.append((int(yr_str), shares))
             except ValueError:
                 pass
+
+    # Income statement (last 10 annual net incomes for the C4 deficit check)
+    annual_income = fetch_av("INCOME_STATEMENT", normalized).get("annualReports", [])[:10]
+    net_incomes = [_safe_float(r.get("netIncome")) for r in annual_income]
+    net_incomes = [v for v in net_incomes if v is not None]
 
     # EPS (criterion 8) — computed via shared helper
     eps_result = get_eps_and_pe(normalized, current_price)
