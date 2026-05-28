@@ -176,3 +176,65 @@ External APIs
 | `ALPHA_VANTAGE_API_LEADING_STOCK` | Stock screening endpoint |
 | `ALPHA_VANTAGE_API_SEARCH_BAR` | Search bar component |
 | `ALPHA_VANTAGE_API_MCP` | MCP tool calls |
+
+---
+
+## Docker Networking & Runtime Layout
+
+### Two Networks Exist Simultaneously
+
+1. **Docker's internal bridge network** — a private virtual network where containers talk to each other by service name (`frontend`, `backend`, `db`). Docker Compose provides automatic DNS, so `backend` resolves to the backend container's internal IP.
+2. **The host machine's network** — where the browser runs. It has no idea what `backend` means; it can only reach what's exposed via the `ports:` mapping in `docker-compose.dev.yml` (e.g. `8000:8000` forwards host port → container port).
+
+Each container also has its own `localhost`. Inside the frontend container, `localhost` means *the frontend container itself*, not the host machine — which is why URLs must change based on where the code executes.
+
+### Why URLs Differ Between Server Components and the Browser
+
+| Caller | URL used | Reason |
+|--------|----------|--------|
+| Next.js **Server Component** (runs in Node, inside the frontend container) | `http://backend:8000` | Request stays inside Docker's bridge network — container-to-container via Docker DNS |
+| **Browser** (runs on the host) | `http://localhost:8000` | Request leaves the host, hits Docker's port forward, gets routed into the backend container |
+
+Recommended pattern: use two env vars — `NEXT_PUBLIC_API_URL=http://localhost:8000` for the browser and an internal-only `INTERNAL_API_URL=http://backend:8000` for Server Components.
+
+### What Runs Where
+
+**Browser (host machine)**
+- Pre-rendered HTML sent down by Next.js
+- Tailwind-compiled CSS
+- Client-side JS bundles (only files marked `"use client"`, e.g. [UserContext.tsx](frontend/src/app/context/UserContext.tsx))
+- React's hydration runtime
+- Cookies: `user_id`, `userName`, `profilePictureURL`, `snapTradeUserID`
+- Does **not** run any TypeScript source, Server Components, or Server Actions — only their compiled output
+
+**Frontend container** (`next dev` on Node.js, port 3000)
+- Next.js dev server handling incoming HTTP requests
+- Server Components (TSX without `"use client"`) — execute here, can read cookies and call the backend
+- Server Actions ([actions.tsx](frontend/src/app/actions.tsx)) — form submissions/mutations run here
+- Webpack/Turbopack bundler producing the JS shipped to the browser
+- Hot reload watcher on `frontend/src/` (works via volume mount)
+- `node_modules`
+
+**Backend container** (Uvicorn + FastAPI, port 8000)
+- FastAPI app ([main.py](backend/main.py)) and routers ([user.py](backend/routes/user.py), [stocks.py](backend/routes/stocks.py), [snapTrade.py](backend/routes/snapTrade.py))
+- SQLAlchemy engine and `SessionLocal` pool ([database.py](backend/database.py)) — connects to `db` via Docker DNS
+- SnapTrade SDK singleton ([snapTradeInitialization.py](backend/snapTradeInitialization.py))
+- boto3 for AWS S3 presigned URLs
+- Outbound calls to SnapTrade / AWS / AlphaVantage leave Docker via NAT over the host's internet
+
+**DB container** (PostgreSQL daemon, port 5432 internal / 5434 on host)
+- All tables (`users_id`, `snaptrade_id`, `snaptrade_connection_accounts`, `snaptrade_dividends`, etc.)
+- Custom composite type `dividend_info(amount_earned, dps, units, trade_date)`
+- A named Docker volume persists data across `docker compose down`
+- Only accepts connections from the backend over the Docker bridge
+
+### End-to-End Request Lifecycle
+
+1. Browser → `GET http://localhost:3000/...` (host network)
+2. Docker forwards host port 3000 → frontend container
+3. Server Component runs in Node, reads cookies, calls `fetch("http://backend:8000/...")`
+4. Request crosses Docker's bridge → backend container
+5. FastAPI opens a `SessionLocal`, runs raw SQL via `text()` → bridge → db container
+6. Postgres returns rows → backend serializes JSON → returns to frontend
+7. Next.js streams HTML + JS bundles to the browser; React hydrates
+8. **After hydration**, any client-side fetch (e.g. button click) goes browser → `localhost:8000` → port forward → backend, **bypassing the frontend container entirely**
