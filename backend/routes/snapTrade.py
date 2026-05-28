@@ -1061,8 +1061,10 @@ def isLeadingStock(
         return eps_val * (latest_cpi / cpi_for_year)
 
     if len(eps_10yr_dated) >= 8:
-        adjusted_recent = [_adjust_eps(yr, val) for yr, val in eps_10yr_dated[:3]]
-        adjusted_early = [_adjust_eps(yr, val) for yr, val in eps_10yr_dated[-3:]]
+        # adjusted_recent = [_adjust_eps(yr, val) for yr, val in eps_10yr_dated[:3]]
+        # adjusted_early = [_adjust_eps(yr, val) for yr, val in eps_10yr_dated[-3:]]
+        adjusted_recent = [val for yr, val in eps_10yr_dated[:3]]
+        adjusted_early = [val  for yr, val in eps_10yr_dated[-3:]]
         avg_recent_eps = sum(adjusted_recent) / 3
         avg_early_eps = sum(adjusted_early) / 3
         if avg_early_eps > 0:
