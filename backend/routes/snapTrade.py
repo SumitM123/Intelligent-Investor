@@ -949,7 +949,6 @@ def isLeadingStock(
     cutoff = (today.year - 10, today.month)
     missing_div_periods = []
     c5_dividends = False
-    failed = False
     _DIV_TOLERANCE_DAYS = 30
     if div_interval_days is not None and div_interval_days > 0 and parsed_divs:
         i = 0
@@ -961,12 +960,15 @@ def isLeadingStock(
             if (abs(difference) <= _DIV_TOLERANCE_DAYS + abs(div_interval_days)):
                 i += 1
                 j += 1
+                if j >= len(parsed_divs):
+                    break
                 current = parsed_divs[i]
                 next = parsed_divs[j]
             else:
                 missing_div_periods.append(f"{current.year}-{current.month:02d}")
-                failed = True
-    c5_dividends = not failed
+                break
+        else:
+            c5_dividends = True
 
 
     # CPI indexed by year — used for YoY EPS inflation adjustment in criterion 8.
