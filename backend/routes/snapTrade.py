@@ -949,17 +949,25 @@ def isLeadingStock(
     cutoff = (today.year - 10, today.month)
     missing_div_periods = []
     c5_dividends = False
+    failed = False
     _DIV_TOLERANCE_DAYS = 30
     if div_interval_days is not None and div_interval_days > 0 and parsed_divs:
-        expected = parsed_divs[0]
-        if (expected.year, expected.month) >= cutoff:
-            while (expected.year, expected.month) >= cutoff:
-                if not any(abs((expected - d).days) <= _DIV_TOLERANCE_DAYS for d in parsed_divs):
-                    missing_div_periods.append(f"{expected.year}-{expected.month:02d}")
-                    break
-                expected = expected - timedelta(days=div_interval_days)
+        i = 0
+        j = 1
+        current = parsed_divs[i]
+        next = parsed_divs[j]
+        while (current.year, current.month) >= cutoff:
+            difference = (current - next).days
+            if (abs(difference) <= _DIV_TOLERANCE_DAYS + abs(div_interval_days)):
+                i += 1
+                j += 1
+                current = parsed_divs[i]
+                next = parsed_divs[j]
             else:
-                c5_dividends = True
+                missing_div_periods.append(f"{current.year}-{current.month:02d}")
+                failed = True
+    c5_dividends = not failed
+
 
     # CPI indexed by year — used for YoY EPS inflation adjustment in criterion 8.
     # AlphaVantage returns annual CPI newest-first,
