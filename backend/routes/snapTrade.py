@@ -954,10 +954,18 @@ def isLeadingStock(
         expected = parsed_divs[0]
         if (expected.year, expected.month) >= cutoff:
             while (expected.year, expected.month) >= cutoff:
-                if not any(abs((expected - d).days) <= _DIV_TOLERANCE_DAYS for d in parsed_divs):
+                # Re-anchor on the nearest actual payment within tolerance, then
+                # step back from the matched date. Anchoring on the real payment
+                # prevents drift from accumulating over many iterations.
+                matched = min(
+                    (d for d in parsed_divs if abs((expected - d).days) <= _DIV_TOLERANCE_DAYS),
+                    key=lambda d: abs((expected - d).days),
+                    default=None,
+                )
+                if matched is None:
                     missing_div_periods.append(f"{expected.year}-{expected.month:02d}")
                     break
-                expected = expected - timedelta(days=div_interval_days)
+                expected = matched - timedelta(days=div_interval_days)
             else:
                 c5_dividends = True
 
