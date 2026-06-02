@@ -9,6 +9,7 @@ import time
 from typing import Optional
 
 _AV_BASE = "https://www.alphavantage.co/query"
+_FMP_BASE = "https://financialmodelingprep.com/stable"
 
 # TEMPORARY: per-key throttle. Tracks the monotonic timestamp of the last
 # successful request issued under each AlphaVantage API key, then blocks the
@@ -51,6 +52,35 @@ def fetch_av(function: str, symbol: Optional[str] = None, **kwargs) -> dict:
         raise HTTPException(status_code=429, detail=f"AlphaVantage rate limit reached: {msg}")
     if "Error Message" in data:
         raise HTTPException(status_code=502, detail=f"AlphaVantage error: {data['Error Message']}")
+    return data
+
+
+def fetch_fmp(path: str, **params):
+    api_key = os.environ["FINANCIAL_MODELING_PREP_API"]
+    query = {"apikey": api_key, **{k: v for k, v in params.items() if k != "apikey"}}
+    url = f"{_FMP_BASE}/{path.lstrip('/')}"
+
+    # Never include `query` (carries apikey) or `exc` (httpx embeds the full URL
+    # including apikey in its string form) in log lines or client-facing details.
+    safe_params = {k: v for k, v in params.items() if k != "apikey"}
+    print(f"[FMP REQ] path={path} params={safe_params}", flush=True)
+    try:
+        resp = httpx.get(url, params=query, timeout=20)
+    except httpx.HTTPError as exc:
+        print(f"[FMP HTTP-ERR] path={path} type={type(exc).__name__}", flush=True)
+        raise HTTPException(status_code=502, detail="FMP request failed")
+
+    if resp.status_code == 429:
+        print(f"[FMP 429] path={path}", flush=True)
+        raise HTTPException(status_code=429, detail="FMP rate limit reached")
+    if resp.status_code >= 400:
+        print(f"[FMP HTTP-ERR] path={path} status={resp.status_code}", flush=True)
+        raise HTTPException(status_code=502, detail=f"FMP request failed (status {resp.status_code})")
+
+    data = resp.json()
+    if isinstance(data, dict) and "Error Message" in data:
+        # FMP's "Error Message" body never contains the apikey, so it is safe to surface.
+        raise HTTPException(status_code=502, detail=f"FMP error: {data['Error Message']}")
     return data
 
 
