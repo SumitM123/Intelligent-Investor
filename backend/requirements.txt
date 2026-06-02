@@ -11,3 +11,4 @@ pydantic
 boto3
 snaptrade-python-sdk
 httpx
+yfinance>=0.2.50
