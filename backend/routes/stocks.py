@@ -30,6 +30,8 @@ def _fetch_etf_weights(symbol: str) -> dict | None:
 # request unreliable past ~100 symbols. If the user's portfolio exceeds that,
 # chunk the symbols client-side and issue multiple requests at an interval
 # rather than sending one oversized call.
+
+# CHECKED
 @router.get("/receiveDiversification")
 def receiveDiversification(
     user_id: Annotated[UUID, Cookie()],
@@ -91,6 +93,7 @@ def receiveDiversification(
         # FMP /stable/profile accepts a single symbol per call (the v3 path-batch
         # form was deprecated Aug 2025). We loop here; cache absorbs repeat work.
         fetched: dict[str, tuple] = {}
+        to_insert = []
         for sym in missing:
             profiles = fetch_fmp("profile", symbol=sym)
             if not isinstance(profiles, list) or not profiles:
@@ -102,22 +105,29 @@ def receiveDiversification(
             if is_etf:
                 # ETF composition shifts too often to cache locally; the route
                 # always fetches fresh weights from yfinance below.
-                fetched[sym] = ("N/A", "N/A", True)
+                sector, industry = "N/A", "N/A"
             else:
                 sector = entry.get("sector") or None
                 industry = entry.get("industry") or None
                 fetched[sym] = (sector, industry, False)
-        # create a mapping that needs to be inserted after retriving the respective values
-        to_insert = []
-        for sym in missing:
-            sector, industry, is_etf = fetched.get(sym, (None, None, False))
-            cache[sym] = (sector, industry, is_etf)
             to_insert.append({
                 "stock_symbol": sym,
                 "sector": sector,
                 "industry": industry,
                 "is_etf": is_etf,
             })
+            cache[sym] = (sector, industry, is_etf)
+        # create a mapping that needs to be inserted after retriving the respective values
+        # to_insert = []
+        # for sym in missing:
+        #     sector, industry, is_etf = fetched.get(sym, (None, None, False))
+        #     cache[sym] = (sector, industry, is_etf)
+        #     to_insert.append({
+        #         "stock_symbol": sym,
+        #         "sector": sector,
+        #         "industry": industry,
+        #         "is_etf": is_etf,
+        #     })
 
         with SessionLocal() as session:
             try:
@@ -141,9 +151,10 @@ def receiveDiversification(
     etfs: list[dict] = []
     for sym in requested:
         sector, industry, is_etf = cache.get(sym, (None, None, False))
-        diversification.append((sym, sector, industry))
         if is_etf:
             weights = _fetch_etf_weights(sym)
             etfs.append({sym: weights if weights is not None else {}})
+        else:
+            diversification.append((sym, sector, industry))
 
     return {"diversification": diversification, "ETFs": etfs}
