@@ -35,6 +35,7 @@ def receiveDiversification(
     user_id: Annotated[UUID, Cookie()],
     symbols: str,
 ):
+    # checking if user exists
     with SessionLocal() as session:
         user_row = session.execute(
             text("SELECT 1 FROM users_id WHERE user_id = :user_id LIMIT 1"),
@@ -48,6 +49,7 @@ def receiveDiversification(
 
     requested: list[str] = []
     seen: set[str] = set()
+    # symbols is going to be a string of CSV 
     for raw in symbols.split(","):
         s = raw.strip().upper()
         if not s:
@@ -57,10 +59,11 @@ def receiveDiversification(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid stock symbol: {s}",
             )
+        # no duplicate symbols
         if s not in seen:
             seen.add(s)
             requested.append(s)
-
+    # no empty symbol string
     if not requested:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -68,6 +71,7 @@ def receiveDiversification(
         )
 
     with SessionLocal() as session:
+        # get's all the rows in one query for each symbol
         cached_rows = session.execute(
             text(
                 """
@@ -79,10 +83,10 @@ def receiveDiversification(
             {"symbols": requested},
         ).all()
 
-    # cache[sym] = (sector, industry, is_etf)
+    # cache[sym] = (sector, industry, is_etf); creating a cache for the already found rows
     cache: dict[str, tuple] = {row[0]: (row[1], row[2], row[3]) for row in cached_rows}
     missing = [s for s in requested if s not in cache]
-
+    # fetching the contents for the symbols that weren't inside of the cache
     if missing:
         # FMP /stable/profile accepts a single symbol per call (the v3 path-batch
         # form was deprecated Aug 2025). We loop here; cache absorbs repeat work.
@@ -103,7 +107,7 @@ def receiveDiversification(
                 sector = entry.get("sector") or None
                 industry = entry.get("industry") or None
                 fetched[sym] = (sector, industry, False)
-
+        # create a mapping that needs to be inserted after retriving the respective values
         to_insert = []
         for sym in missing:
             sector, industry, is_etf = fetched.get(sym, (None, None, False))
@@ -133,14 +137,12 @@ def receiveDiversification(
                 session.rollback()
                 raise
 
-    diversification = [
-        (sym, cache.get(sym, (None, None, False))[0], cache.get(sym, (None, None, False))[1])
-        for sym in requested
-    ]
-
+    diversification = []
     etfs: list[dict] = []
     for sym in requested:
-        if cache.get(sym, (None, None, False))[2]:
+        sector, industry, is_etf = cache.get(sym, (None, None, False))
+        diversification.append((sym, sector, industry))
+        if is_etf:
             weights = _fetch_etf_weights(sym)
             etfs.append({sym: weights if weights is not None else {}})
 
