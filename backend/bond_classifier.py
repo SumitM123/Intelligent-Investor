@@ -23,7 +23,7 @@ TREASURY_DIRECT_BASE = "https://www.treasurydirect.gov/TA_WS/securities/search"
 FINNHUB_BASE = "https://finnhub.io/api/v1/bond/profile"
 
 DEFAULT_FACE_VALUE = 1000.0
-CACHE_TTL_DAYS = 30
+CACHE_TTL_DAYS = 365
 HTTP_TIMEOUT_SECONDS = 10.0
 
 # FRED Treasury yield series → tenor in years
@@ -215,6 +215,21 @@ def get_bond_profile(cusip: str, session: Session) -> Optional[dict]:
             "face_value": float(cached[3]) if cached[3] is not None else DEFAULT_FACE_VALUE,
             "bond_type": cached[4] or "corporate",
         }
+
+    # No fresh row. If a stale row for this CUSIP exists (past the 30-day TTL),
+    # delete it so the table doesn't retain an expired profile when the Finnhub
+    # re-fetch below fails (in which case ON CONFLICT never overwrites it).
+    try:
+        session.execute(
+            text("""
+                DELETE FROM bond_profile_cache
+                WHERE cusip = :cusip AND cached_at <= :cutoff
+            """),
+            {"cusip": cusip, "cutoff": cutoff},
+        )
+        session.commit()
+    except Exception:
+        session.rollback()
 
     raw = _fetch_finnhub_profile(cusip)
     if not raw:
