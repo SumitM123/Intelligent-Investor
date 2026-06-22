@@ -63,7 +63,7 @@ def syncBonds(
             continue
         seen.add(c)
         cleaned_cusips.append(c)
-
+    # continue from here
     with SessionLocal() as session:
         try:
             existing_row = session.execute(
