@@ -73,4 +73,18 @@ CREATE TABLE IF NOT EXISTS bonds_table (
     PRIMARY KEY (user_id, is_defensive)
 );
 
+-- Cached bond fundamentals from Finnhub /bond/profile, keyed by CUSIP.
+-- 365-day TTL enforced in code (cached_at compared against cutoff in bond_classifier.py).
+-- coupon_rate / face_value stored as decimals (coupon_rate e.g. 0.05 = 5%).
+-- PK matches ON CONFLICT (cusip) in get_bond_profile upsert.
+CREATE TABLE IF NOT EXISTS bond_profile_cache (
+    cusip         TEXT PRIMARY KEY,
+    coupon_rate   FLOAT,
+    payment_freq  TEXT,
+    maturity_date DATE,
+    face_value    FLOAT,
+    bond_type     TEXT,
+    cached_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 COMMIT;
