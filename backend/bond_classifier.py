@@ -9,7 +9,9 @@ returned in BASIS POINTS. FRED series come back in percent, so they are
 converted at the boundary.
 """
 
+import base64
 import os
+import time
 from datetime import date, datetime, timedelta
 from typing import Optional
 
@@ -22,9 +24,25 @@ FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
 TREASURY_DIRECT_BASE = "https://www.treasurydirect.gov/TA_WS/securities/search"
 FINNHUB_BASE = "https://finnhub.io/api/v1/bond/profile"
 
+# FINRA Fixed Income (TRACE) — the only free source of US corporate-bond trade
+# prices keyed by CUSIP. OAuth2 client-credentials; prices quoted per 100 of par.
+FINRA_TOKEN_URL = "https://ews.fip.finra.org/fip/rest/ews/oauth2/access_token"
+FINRA_DATA_BASE = "https://api.finra.org/data"
+FINRA_TRACE_GROUP = "fixedIncomeMarket"
+FINRA_TRACE_DATASET = "trace"
+# NOTE: the dataset name + field names below are medium-confidence (sourced from a
+# community FINRA client, not field-level official docs). Confirm once credentialed:
+#   GET https://api.finra.org/metadata/group/fixedIncomeMarket/name/trace
+FINRA_CUSIP_FIELD = "cusip"
+FINRA_PRICE_FIELD = "lastSalePrice"        # all-in price, per 100 of par
+FINRA_TRADE_DATE_FIELD = "tradeReportDate"
+
 DEFAULT_FACE_VALUE = 1000.0
 CACHE_TTL_DAYS = 365
 HTTP_TIMEOUT_SECONDS = 10.0
+
+# In-memory FINRA OAuth token cache: {"token": str | None, "expires_at": epoch_s}.
+_finra_token_cache = {"token": None, "expires_at": 0.0}
 
 # FRED Treasury yield series → tenor in years
 TREASURY_SERIES = {
@@ -124,6 +142,55 @@ def _normalise_payment_freq(freq: str) -> str:
     return "semi-annual"
 
 
+def _get_finra_token() -> Optional[str]:
+    """Return a cached or freshly-minted FINRA OAuth2 bearer token, or None.
+
+    Uses client-credentials grant with HTTP Basic auth. The token is cached in
+    memory until ~60s before its stated expiry to avoid a round-trip per call.
+    """
+    client_id = os.getenv("FINRA_CLIENT_ID")
+    client_secret = os.getenv("FINRA_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        return None
+
+    now = time.time()
+    cached = _finra_token_cache.get("token")
+    if cached and _finra_token_cache.get("expires_at", 0.0) > now + 60:
+        return cached
+
+    try:
+        basic = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+        with httpx.Client(timeout=HTTP_TIMEOUT_SECONDS) as client:
+            response = client.post(
+                FINRA_TOKEN_URL,
+                params={"grant_type": "client_credentials"},
+                headers={"Authorization": f"Basic {basic}"},
+            )
+            response.raise_for_status()
+            data = response.json()
+        token = data.get("access_token")
+        if not token:
+            return None
+        expires_in = float(data.get("expires_in", 1800))
+        _finra_token_cache["token"] = token
+        _finra_token_cache["expires_at"] = now + expires_in
+        return token
+    except (httpx.HTTPError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _extract_finra_records(payload) -> list:
+    """Pull the record list out of a FINRA response (envelope shape varies)."""
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        for key in ("records", "data", "results"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return value
+    return []
+
+
 # ---------------------------------------------------------------------------
 # Public helpers (used by classify_bond; exported for unit testing)
 # ---------------------------------------------------------------------------
@@ -190,6 +257,54 @@ def calculate_ytm(price: float, principal: float, coupon_annual: float, maturity
     numerator = coupon_annual + (principal - price) / maturity_years
     denominator = (principal + price) / 2.0
     return numerator / denominator
+
+
+def get_bond_price(cusip: str, face_value: float = DEFAULT_FACE_VALUE) -> Optional[float]:
+    """Return the latest FINRA TRACE price for a CUSIP, in dollars.
+
+    FINRA quotes corporate-bond prices per 100 of par, so we scale by face_value
+    (price_per_100 / 100 × face_value) to match the dollar units `calculate_ytm`
+    expects for `price`/`principal`. Returns None if FINRA is unconfigured, has no
+    recent trade for the CUSIP, or errors — callers should fall back to par.
+    """
+    if not cusip:
+        return None
+    token = _get_finra_token()
+    if not token:
+        return None
+
+    body = {
+        "compareFilters": [
+            {"fieldName": FINRA_CUSIP_FIELD, "fieldValue": cusip, "compareType": "EQUAL"}
+        ],
+        "sortFields": [f"-{FINRA_TRADE_DATE_FIELD}"],  # newest trade first
+        "limit": 1,
+    }
+    try:
+        with httpx.Client(timeout=HTTP_TIMEOUT_SECONDS) as client:
+            response = client.post(
+                f"{FINRA_DATA_BASE}/group/{FINRA_TRACE_GROUP}/name/{FINRA_TRACE_DATASET}",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json=body,
+            )
+            response.raise_for_status()
+            data = response.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+
+    records = _extract_finra_records(data)
+    if not records:
+        return None
+    price_per_100 = records[0].get(FINRA_PRICE_FIELD)
+    if price_per_100 in (None, ""):
+        return None
+    try:
+        return float(price_per_100) / 100.0 * face_value
+    except (ValueError, TypeError):
+        return None
 
 
 def get_bond_profile(cusip: str, session: Session) -> Optional[dict]:
@@ -428,7 +543,11 @@ def classify_bond(cusip: str, session: Session, fred_api_key: str) -> dict:
     # annual total, only the periodic-payment size, so no annualise_coupon call is
     # needed here. The helper is kept for direct unit testing.
     coupon_annual = coupon_rate * face_value
-    price = face_value  # Manual entry has no price feed; default to par.
+    # Real market price from FINRA (per 100 of par → dollars). Falls back to par
+    # when FINRA has no recent trade or is unconfigured; at par, YTM ≈ coupon rate.
+    price = get_bond_price(cusip, face_value)
+    if price is None:
+        price = face_value
     ytm = calculate_ytm(price, face_value, coupon_annual, maturity_years)
 
     curve = get_treasury_curve(fred_api_key)
