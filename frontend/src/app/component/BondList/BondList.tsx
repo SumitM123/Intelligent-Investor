@@ -9,6 +9,14 @@ export interface BondEntry {
   ytm?: number | null;
   spread_bps?: number | null;
   bond_type?: string;
+  // Current market price, quoted per 100 of par (e.g. 98.50 = $985 on a $1,000 bond).
+  // User-provided; feeds the YTM calculation on the backend.
+  price?: number | null;
+  // Number of bonds held (each $1,000 face). Scales dollars invested, not the grade.
+  quantity?: number | null;
+  // Purchase date (ISO "YYYY-MM-DD"). Selects the historical market context for an
+  // "at purchase" grade. User-provided.
+  purchase_date?: string | null;
 }
 
 interface BondListProps {
@@ -32,6 +40,57 @@ export default function BondList({ initialBonds, isDefensive }: BondListProps) {
   const [inputCusip, setInputCusip] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Per-CUSIP draft price (raw input string, so partial entries like "98." are
+  // preserved while typing). Seeded from any prices that came back with the bonds.
+  const [priceInputs, setPriceInputs] = useState<Record<string, string>>(() => {
+    const map: Record<string, string> = {};
+    for (const b of initialBonds ?? []) {
+      if (b.price !== null && b.price !== undefined) {
+        map[b.cusip] = String(b.price);
+      }
+    }
+    return map;
+  });
+
+  // Per-CUSIP draft quantity (whole number of bonds) and purchase date (ISO string),
+  // seeded the same way as price so saved values round-trip back into the inputs.
+  const [quantityInputs, setQuantityInputs] = useState<Record<string, string>>(() => {
+    const map: Record<string, string> = {};
+    for (const b of initialBonds ?? []) {
+      if (b.quantity !== null && b.quantity !== undefined) {
+        map[b.cusip] = String(b.quantity);
+      }
+    }
+    return map;
+  });
+  const [dateInputs, setDateInputs] = useState<Record<string, string>>(() => {
+    const map: Record<string, string> = {};
+    for (const b of initialBonds ?? []) {
+      if (b.purchase_date) {
+        map[b.cusip] = b.purchase_date;
+      }
+    }
+    return map;
+  });
+
+  // Today in ISO form, used to stop the date picker from accepting a future buy date.
+  const today = new Date().toISOString().slice(0, 10);
+
+  const handlePriceChange = (cusip: string, value: string) => {
+    // Permit only an empty field or a non-negative decimal (no letters/signs).
+    if (value !== "" && !/^\d*\.?\d*$/.test(value)) return;
+    setPriceInputs((prev) => ({ ...prev, [cusip]: value }));
+  };
+
+  const handleQuantityChange = (cusip: string, value: string) => {
+    // Whole, non-negative count only (or empty).
+    if (value !== "" && !/^\d*$/.test(value)) return;
+    setQuantityInputs((prev) => ({ ...prev, [cusip]: value }));
+  };
+
+  const handleDateChange = (cusip: string, value: string) => {
+    setDateInputs((prev) => ({ ...prev, [cusip]: value }));
+  };
 
   const syncToBackend = async (cusips: string[]): Promise<BondEntry[]> => {
     const apiBase = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
@@ -188,11 +247,16 @@ export default function BondList({ initialBonds, isDefensive }: BondListProps) {
           </p>
         </div>
       ) : (
-        <div className="rounded-lg border border-[var(--border)] overflow-hidden">
+        <div className="rounded-lg border border-[var(--border)] overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-[var(--surface-muted)] text-[10px] font-semibold tracking-widest uppercase text-[var(--muted)]">
               <tr className="border-b border-[var(--border)]">
                 <th className="text-left px-4 py-2.5">CUSIP</th>
+                <th className="text-left px-3 py-2.5">
+                  Price <span className="font-normal normal-case tracking-normal text-[var(--muted)]">/ 100</span>
+                </th>
+                <th className="text-right px-3 py-2.5">Qty</th>
+                <th className="text-left px-3 py-2.5">Purchase date</th>
                 <th className="text-left px-3 py-2.5">Grade</th>
                 <th className="text-left px-3 py-2.5">Type</th>
                 <th className="text-right px-3 py-2.5">YTM</th>
@@ -206,6 +270,47 @@ export default function BondList({ initialBonds, isDefensive }: BondListProps) {
                 return (
                   <tr key={b.cusip} className="border-b border-[var(--border)] last:border-0 hover:bg-black/[0.02] transition">
                     <td className="px-4 py-3 font-mono tabular font-semibold">{b.cusip}</td>
+                    <td className="px-3 py-3">
+                      <div className="flex items-center gap-1 w-[100px] px-2 py-1 rounded border border-[var(--border)] bg-[var(--background)] focus-within:border-[var(--accent)] focus-within:ring-2 focus-within:ring-[color-mix(in_oklch,var(--accent)_15%,transparent)] transition">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={priceInputs[b.cusip] ?? ""}
+                          onChange={(e) => handlePriceChange(b.cusip, e.target.value)}
+                          placeholder="98.50"
+                          disabled={loading}
+                          className="w-full bg-transparent outline-none font-mono tabular text-sm placeholder:text-[var(--muted)]"
+                          aria-label={`Price for ${b.cusip}`}
+                        />
+                      </div>
+                    </td>
+                    <td className="px-3 py-3">
+                      <div className="flex items-center w-[72px] ml-auto px-2 py-1 rounded border border-[var(--border)] bg-[var(--background)] focus-within:border-[var(--accent)] focus-within:ring-2 focus-within:ring-[color-mix(in_oklch,var(--accent)_15%,transparent)] transition">
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={quantityInputs[b.cusip] ?? ""}
+                          onChange={(e) => handleQuantityChange(b.cusip, e.target.value)}
+                          placeholder="10"
+                          disabled={loading}
+                          className="w-full bg-transparent outline-none font-mono tabular text-sm text-right placeholder:text-[var(--muted)]"
+                          aria-label={`Quantity for ${b.cusip}`}
+                        />
+                      </div>
+                    </td>
+                    <td className="px-3 py-3">
+                      <div className="flex items-center w-[150px] px-2 py-1 rounded border border-[var(--border)] bg-[var(--background)] focus-within:border-[var(--accent)] focus-within:ring-2 focus-within:ring-[color-mix(in_oklch,var(--accent)_15%,transparent)] transition">
+                        <input
+                          type="date"
+                          value={dateInputs[b.cusip] ?? ""}
+                          max={today}
+                          onChange={(e) => handleDateChange(b.cusip, e.target.value)}
+                          disabled={loading}
+                          className="w-full bg-transparent outline-none font-mono tabular text-xs placeholder:text-[var(--muted)]"
+                          aria-label={`Purchase date for ${b.cusip}`}
+                        />
+                      </div>
+                    </td>
                     <td className="px-3 py-3">
                       <span
                         className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-semibold tabular"
