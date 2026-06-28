@@ -102,4 +102,19 @@ CREATE TABLE IF NOT EXISTS bond_profile_cache (
     cached_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Daily FRED ICE BofA OAS bucket boundaries in basis points, keyed by date.
+-- Populated by get_or_fetch_oas_buckets in bond_classifier.py: reads today's row;
+-- on miss, pulls all 5 series from FRED and inserts. Values from FRED are already
+-- in basis points (e.g. 83 = 83 bps) and stored as-is.
+-- PK matches ON CONFLICT (date) in the upsert.
+CREATE TABLE IF NOT EXISTS fred_oas_spreads (
+    date       DATE PRIMARY KEY,
+    aaa_oas    FLOAT NOT NULL,
+    aa_oas     FLOAT NOT NULL,
+    a_oas      FLOAT NOT NULL,
+    bbb_oas    FLOAT NOT NULL,
+    hy_oas     FLOAT NOT NULL,
+    fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 COMMIT;
