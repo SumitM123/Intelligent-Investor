@@ -30,7 +30,10 @@ class BondsSyncRequest(BaseModel):
     cusips: list[str]
     is_defensive: bool
 
-
+'''
+    REVIEW THIS ROUTE. Sometimes if bonds are deleted, then won't be updated inside of the
+    database. Check this and fix
+'''
 @router.post("")
 def syncBonds(
     user_id: Annotated[UUID, Cookie()],
@@ -113,7 +116,9 @@ def syncBonds(
                 detail=f"Failed to sync bonds: {exc}",
             )
 
-
+'''
+    Used to get the list of bonds that the user when user first enters the page
+'''
 @router.get("")
 def getBonds(
     user_id: Annotated[UUID, Cookie()],
