@@ -951,23 +951,25 @@ def isLeadingStock(
     c5_dividends = False
     _DIV_TOLERANCE_DAYS = 30
     if div_interval_days is not None and div_interval_days > 0 and parsed_divs:
-        expected = parsed_divs[0]
-        if (expected.year, expected.month) >= cutoff:
-            while (expected.year, expected.month) >= cutoff:
-                # Re-anchor on the nearest actual payment within tolerance, then
-                # step back from the matched date. Anchoring on the real payment
-                # prevents drift from accumulating over many iterations.
-                matched = min(
-                    (d for d in parsed_divs if abs((expected - d).days) <= _DIV_TOLERANCE_DAYS),
-                    key=lambda d: abs((expected - d).days),
-                    default=None,
-                )
-                if matched is None:
-                    missing_div_periods.append(f"{expected.year}-{expected.month:02d}")
+        i = 0
+        j = 1
+        current = parsed_divs[i]
+        next = parsed_divs[j]
+        while (current.year, current.month) >= cutoff:
+            difference = (current - next).days
+            if (abs(difference) <= _DIV_TOLERANCE_DAYS + abs(div_interval_days)):
+                i += 1
+                j += 1
+                if j >= len(parsed_divs):
                     break
-                expected = matched - timedelta(days=div_interval_days)
+                current = parsed_divs[i]
+                next = parsed_divs[j]
             else:
-                c5_dividends = True
+                missing_div_periods.append(f"{current.year}-{current.month:02d}")
+                break
+        else:
+            c5_dividends = True
+
 
     # CPI indexed by year — used for YoY EPS inflation adjustment in criterion 8.
     # AlphaVantage returns annual CPI newest-first,
