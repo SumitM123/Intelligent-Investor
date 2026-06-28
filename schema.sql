@@ -63,6 +63,21 @@ CREATE TABLE IF NOT EXISTS leading_stock_analysis (
     last_checked     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Cached sector/industry classification per stock symbol (from FMP profile endpoint).
+-- Looked up on every /api/stocks/receiveDiversification request before calling FMP.
+-- For ETFs, sector and industry are stored as 'N/A'; sector weights are fetched
+-- live from yfinance per request (not cached, since ETF composition shifts).
+CREATE TABLE IF NOT EXISTS stock_industry (
+    stock_symbol TEXT PRIMARY KEY,
+    sector       TEXT,
+    industry     TEXT,
+    is_etf       BOOLEAN NOT NULL DEFAULT false
+);
+
+-- Backfill the column for installations that pre-date it.
+ALTER TABLE stock_industry
+    ADD COLUMN IF NOT EXISTS is_etf BOOLEAN NOT NULL DEFAULT false;
+
 -- Per-user bond holdings, partitioned by investor type (defensive vs enterprising).
 -- Composite PK matches ON CONFLICT (user_id, is_defensive) in bonds.py upsert.
 CREATE TABLE IF NOT EXISTS bonds_table (
