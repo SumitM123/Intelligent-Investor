@@ -82,8 +82,15 @@ PAYMENTS_PER_YEAR = {
 # Private helpers
 # ---------------------------------------------------------------------------
 
-def _fetch_fred_series(series_id: str, fred_api_key: str) -> Optional[float]:
-    """Fetch the most recent non-null observation value for a FRED series."""
+def _fetch_fred_series(
+    series_id: str, fred_api_key: str, observation_end: Optional[str] = None
+) -> Optional[float]:
+    """Fetch the most recent non-null observation value for a FRED series.
+
+    When `observation_end` (ISO "YYYY-MM-DD") is given, FRED only returns
+    observations up to that date, so the newest hit is the latest value on/before
+    it — i.e. the series value as it stood on that historical date.
+    """
     if not fred_api_key:
         return None
     params = {
@@ -93,6 +100,8 @@ def _fetch_fred_series(series_id: str, fred_api_key: str) -> Optional[float]:
         "limit": 5,  # newest may be "." (no data); scan a few back
         "file_type": "json",
     }
+    if observation_end:
+        params["observation_end"] = observation_end
     try:
         with httpx.Client(timeout=HTTP_TIMEOUT_SECONDS) as client:
             response = client.get(FRED_BASE, params=params)
@@ -107,25 +116,29 @@ def _fetch_fred_series(series_id: str, fred_api_key: str) -> Optional[float]:
     return None
 
 
-def _fetch_finnhub_profile(cusip: str) -> Optional[dict]:
-    """Fetch raw bond profile from Finnhub. Returns None on failure or empty."""
-    finnhub_key = os.getenv("FINNHUB_API_KEY")
-    if not finnhub_key or not cusip:
-        return None
-    try:
-        with httpx.Client(timeout=HTTP_TIMEOUT_SECONDS) as client:
-            response = client.get(
-                FINNHUB_BASE,
-                params={"cusip": cusip, "token": finnhub_key},
-            )
-            response.raise_for_status()
-            data = response.json()
-        # Free tier returns {} or partial data for unknown CUSIPs
-        if not data or data.get("couponRate") in (None, "", 0):
-            return None
-        return data
-    except (httpx.HTTPError, ValueError):
-        return None
+# NEED TO HAVE PREMIUM API KEY INSEAD OF FREE TIER.
+# Disabled: this coupon-rate + maturity lookup calls Finnhub /bond/profile, which is a
+# premium endpoint — it returns HTTP 403 "You don't have access to this resource" on the
+# free tier, so the lookup can never succeed without a paid key.
+# def _fetch_finnhub_profile(cusip: str) -> Optional[dict]:
+#     """Fetch raw bond profile from Finnhub. Returns None on failure or empty."""
+#     finnhub_key = os.getenv("FINNHUB_API_KEY")
+#     if not finnhub_key or not cusip:
+#         return None
+#     try:
+#         with httpx.Client(timeout=HTTP_TIMEOUT_SECONDS) as client:
+#             response = client.get(
+#                 FINNHUB_BASE,
+#                 params={"cusip": cusip, "token": finnhub_key},
+#             )
+#             response.raise_for_status()
+#             data = response.json()
+#         # Free tier returns {} or partial data for unknown CUSIPs
+#         if not data or data.get("couponRate") in (None, "", 0):
+#             return None
+#         return data
+#     except (httpx.HTTPError, ValueError):
+#         return None
 
 
 def _normalise_payment_freq(freq: str) -> str:
@@ -217,15 +230,19 @@ def is_treasury(cusip: str) -> bool:
         return False
 
 
-def get_treasury_curve(fred_api_key: str) -> dict:
+def get_treasury_curve(fred_api_key: str, as_of_date: Optional[str] = None) -> dict:
     """Return {tenor_years: yield_decimal} for the 10 DGS series.
 
     FRED reports values in percent; we divide by 100 so the curve is in decimal
     form (0.0425 = 4.25%) and can be compared directly to a decimal YTM.
+
+    `as_of_date` (ISO "YYYY-MM-DD") pins the curve to a historical date so the
+    spread reflects the Treasury yields as of purchase; when omitted the curve
+    is today's.
     """
     curve = {}
     for series_id, tenor in TREASURY_SERIES.items():
-        value = _fetch_fred_series(series_id, fred_api_key)
+        value = _fetch_fred_series(series_id, fred_api_key, observation_end=as_of_date)
         if value is not None:
             curve[tenor] = value / 100.0
     return curve
@@ -325,7 +342,7 @@ def get_bond_profile(cusip: str, session: Session) -> Optional[dict]:
     cutoff = datetime.now() - timedelta(days=CACHE_TTL_DAYS)
     cached = session.execute(
         text("""
-            SELECT coupon_rate, payment_freq, maturity_date, face_value, bond_type
+            SELECT coupon_rate, maturity_date, face_value, bond_type
             FROM bond_profile_cache
             WHERE cusip = :cusip AND cached_at > :cutoff
         """),
@@ -335,10 +352,9 @@ def get_bond_profile(cusip: str, session: Session) -> Optional[dict]:
     if cached:
         return {
             "coupon_rate": float(cached[0]) if cached[0] is not None else 0.0,
-            "payment_freq": cached[1] or "semi-annual",
-            "maturity_date": cached[2],
-            "face_value": float(cached[3]) if cached[3] is not None else DEFAULT_FACE_VALUE,
-            "bond_type": cached[4] or "corporate",
+            "maturity_date": cached[1],
+            "face_value": float(cached[2]) if cached[2] is not None else DEFAULT_FACE_VALUE,
+            "bond_type": cached[3] or "corporate",
         }
 
     # No fresh row. If a stale row for this CUSIP exists (past the 30-day TTL),
@@ -356,91 +372,110 @@ def get_bond_profile(cusip: str, session: Session) -> Optional[dict]:
     except Exception:
         session.rollback()
 
-    raw = _fetch_finnhub_profile(cusip)
-    if not raw:
-        return None
+    # NEED TO HAVE PREMIUM API KEY INSEAD OF FREE TIER.
+    # The coupon-rate + maturity lookup below calls Finnhub /bond/profile, which is a
+    # premium endpoint (HTTP 403 on the free tier). Without a paid key it never returns
+    # data, so the lookup is disabled and we report no profile (-> Unclassified) here.
+    return None
 
-    try:
-        coupon_rate_pct = float(raw.get("couponRate") or 0)
-        coupon_rate = coupon_rate_pct / 100.0  # Finnhub returns percent (e.g. 5.0)
-        payment_freq = _normalise_payment_freq(raw.get("paymentFrequency", ""))
-        maturity_str = raw.get("maturityDate", "")
-        maturity_date = (
-            datetime.strptime(maturity_str, "%Y-%m-%d").date() if maturity_str else None
-        )
-    except (ValueError, TypeError):
-        return None
+    # raw = _fetch_finnhub_profile(cusip)
+    # if not raw:
+    #     return None
+    #
+    # try:
+    #     coupon_rate_pct = float(raw.get("couponRate") or 0)
+    #     coupon_rate = coupon_rate_pct / 100.0  # Finnhub returns percent (e.g. 5.0)
+    #     maturity_str = raw.get("maturityDate", "")
+    #     maturity_date = (
+    #         datetime.strptime(maturity_str, "%Y-%m-%d").date() if maturity_str else None
+    #     )
+    # except (ValueError, TypeError):
+    #     return None
+    #
+    # if not maturity_date or coupon_rate <= 0:
+    #     return None
+    #
+    # face_value = DEFAULT_FACE_VALUE
+    # bond_type = "corporate"  # Finnhub /bond/profile does not return a category
+    #
+    # try:
+    #     session.execute(
+    #         text("""
+    #             INSERT INTO bond_profile_cache
+    #                 (cusip, coupon_rate, maturity_date, face_value, bond_type, cached_at)
+    #             VALUES (:cusip, :coupon_rate, :maturity_date, :face_value, :bond_type, NOW())
+    #             ON CONFLICT (cusip) DO UPDATE SET
+    #                 coupon_rate = EXCLUDED.coupon_rate,
+    #                 maturity_date = EXCLUDED.maturity_date,
+    #                 face_value = EXCLUDED.face_value,
+    #                 bond_type = EXCLUDED.bond_type,
+    #                 cached_at = NOW()
+    #         """),
+    #         {
+    #             "cusip": cusip,
+    #             "coupon_rate": coupon_rate,
+    #             "maturity_date": maturity_date,
+    #             "face_value": face_value,
+    #             "bond_type": bond_type,
+    #         },
+    #     )
+    #     session.commit()
+    # except Exception:
+    #     session.rollback()
+    #     # Lookup succeeded; cache write failed. Still return the profile.
+    #
+    # return {
+    #     "coupon_rate": coupon_rate,
+    #     "maturity_date": maturity_date,
+    #     "face_value": face_value,
+    #     "bond_type": bond_type,
+    # }
 
-    if not maturity_date or coupon_rate <= 0:
-        return None
 
-    face_value = DEFAULT_FACE_VALUE
-    bond_type = "corporate"  # Finnhub /bond/profile does not return a category
+def get_or_fetch_oas_buckets(
+    session: Session, fred_api_key: str, purchase_date_str: Optional[str] = None
+) -> Optional[dict]:
+    """Return the OAS bucket boundaries in basis points, as of the purchase date.
 
-    try:
-        session.execute(
-            text("""
-                INSERT INTO bond_profile_cache
-                    (cusip, coupon_rate, payment_freq, maturity_date, face_value, bond_type, cached_at)
-                VALUES (:cusip, :coupon_rate, :payment_freq, :maturity_date, :face_value, :bond_type, NOW())
-                ON CONFLICT (cusip) DO UPDATE SET
-                    coupon_rate = EXCLUDED.coupon_rate,
-                    payment_freq = EXCLUDED.payment_freq,
-                    maturity_date = EXCLUDED.maturity_date,
-                    face_value = EXCLUDED.face_value,
-                    bond_type = EXCLUDED.bond_type,
-                    cached_at = NOW()
-            """),
-            {
-                "cusip": cusip,
-                "coupon_rate": coupon_rate,
-                "payment_freq": payment_freq,
-                "maturity_date": maturity_date,
-                "face_value": face_value,
-                "bond_type": bond_type,
-            },
-        )
-        session.commit()
-    except Exception:
-        session.rollback()
-        # Lookup succeeded; cache write failed. Still return the profile.
+    `purchase_date_str` (ISO "YYYY-MM-DD") pins the rating thresholds to the date
+    the bond was bought, so they line up with the purchase-date Treasury curve.
 
-    return {
-        "coupon_rate": coupon_rate,
-        "payment_freq": payment_freq,
-        "maturity_date": maturity_date,
-        "face_value": face_value,
-        "bond_type": bond_type,
-    }
-
-
-def get_or_fetch_oas_buckets(session: Session, fred_api_key: str) -> Optional[dict]:
-    """Return today's OAS bucket boundaries in basis points.
-
-    Reads `fred_oas_spreads` for today; if no row exists, fetches all 5 FRED
-    series, converts percent → bps (multiply by 100), and inserts.
+    The `fred_oas_spreads` cache only ever holds today's row:
+      - When the purchase date is today (or omitted), this reads the cache and,
+        on a miss, fetches the latest FRED values, caches them, and returns.
+      - When the purchase date is historical, the buckets are fetched from FRED
+        pinned to that date (observation_end) and returned WITHOUT caching, so
+        the cache stays limited to today's values only.
     """
     today = date.today()
-    row = session.execute(
-        text("""
-            SELECT aaa_oas, aa_oas, a_oas, bbb_oas, hy_oas
-            FROM fred_oas_spreads WHERE date = :d
-        """),
-        {"d": today},
-    ).first()
+    as_of = purchase_date_str or today.isoformat()
 
-    if row:
-        return {
-            "aaa_oas": float(row[0]),
-            "aa_oas": float(row[1]),
-            "a_oas": float(row[2]),
-            "bbb_oas": float(row[3]),
-            "hy_oas": float(row[4]),
-        }
+    if as_of == today.isoformat():
+        # Today's buckets — served from (and written back to) the cache.
+        row = session.execute(
+            text("""
+                SELECT aaa_oas, aa_oas, a_oas, bbb_oas, hy_oas
+                FROM fred_oas_spreads WHERE date = :d
+            """),
+            {"d": today},
+        ).first()
+
+        if row:
+            return {
+                "aaa_oas": float(row[0]),
+                "aa_oas": float(row[1]),
+                "a_oas": float(row[2]),
+                "bbb_oas": float(row[3]),
+                "hy_oas": float(row[4]),
+            }
+        observation_end = None  # cache miss: fetch the latest values
+    else:
+        # Historical purchase date — fetch as-of that date; do NOT cache.
+        observation_end = as_of
 
     raw_percent = {}
     for key, series_id in OAS_SERIES.items():
-        value = _fetch_fred_series(series_id, fred_api_key)
+        value = _fetch_fred_series(series_id, fred_api_key, observation_end=observation_end)
         if value is None:
             return None
         raw_percent[key] = value
@@ -448,33 +483,36 @@ def get_or_fetch_oas_buckets(session: Session, fred_api_key: str) -> Optional[di
     # FRED OAS values are in percentage points (e.g. 0.32 = 0.32% = 32 bps).
     values_bps = {k: v * 100.0 for k, v in raw_percent.items()}
 
-    try:
-        session.execute(
-            text("""
-                INSERT INTO fred_oas_spreads
-                    (date, aaa_oas, aa_oas, a_oas, bbb_oas, hy_oas, fetched_at)
-                VALUES (:d, :aaa, :aa, :a, :bbb, :hy, NOW())
-                ON CONFLICT (date) DO UPDATE SET
-                    aaa_oas = EXCLUDED.aaa_oas,
-                    aa_oas = EXCLUDED.aa_oas,
-                    a_oas = EXCLUDED.a_oas,
-                    bbb_oas = EXCLUDED.bbb_oas,
-                    hy_oas = EXCLUDED.hy_oas,
-                    fetched_at = NOW()
-            """),
-            {
-                "d": today,
-                "aaa": values_bps["aaa_oas"],
-                "aa": values_bps["aa_oas"],
-                "a": values_bps["a_oas"],
-                "bbb": values_bps["bbb_oas"],
-                "hy": values_bps["hy_oas"],
-            },
-        )
-        session.commit()
-    except Exception:
-        session.rollback()
-        # Even if persistence fails, return what we just fetched.
+    # Only today's buckets are cached; historical purchase-date fetches are not,
+    # so the cache never holds anything but today's row.
+    if observation_end is None:
+        try:
+            session.execute(
+                text("""
+                    INSERT INTO fred_oas_spreads
+                        (date, aaa_oas, aa_oas, a_oas, bbb_oas, hy_oas, fetched_at)
+                    VALUES (:d, :aaa, :aa, :a, :bbb, :hy, NOW())
+                    ON CONFLICT (date) DO UPDATE SET
+                        aaa_oas = EXCLUDED.aaa_oas,
+                        aa_oas = EXCLUDED.aa_oas,
+                        a_oas = EXCLUDED.a_oas,
+                        bbb_oas = EXCLUDED.bbb_oas,
+                        hy_oas = EXCLUDED.hy_oas,
+                        fetched_at = NOW()
+                """),
+                {
+                    "d": today,
+                    "aaa": values_bps["aaa_oas"],
+                    "aa": values_bps["aa_oas"],
+                    "a": values_bps["a_oas"],
+                    "bbb": values_bps["bbb_oas"],
+                    "hy": values_bps["hy_oas"],
+                },
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
+            # Even if persistence fails, return what we just fetched.
 
     return values_bps
 
@@ -496,8 +534,25 @@ def classify_grade(spread_bps: float, oas_buckets: dict) -> tuple:
 # Public entry point
 # ---------------------------------------------------------------------------
 
-def classify_bond(cusip: str, session: Session, fred_api_key: str) -> dict:
+def classify_bond(
+    cusip: str,
+    session: Session,
+    fred_api_key: str,
+    price_per_100: Optional[float] = None,
+    coupon_rate_pct: Optional[float] = None,
+    maturity_date_str: Optional[str] = None,
+    purchase_date_str: Optional[str] = None,
+) -> dict:
     """Classify a single bond by CUSIP.
+
+    `price_per_100` is the user-supplied market price quoted per 100 of par
+    (e.g. 98.5 = $985 on a $1,000 bond). When provided it drives the YTM; when
+    omitted, price falls back to par and YTM collapses to the coupon rate.
+
+    `coupon_rate_pct` (annual coupon as a percent, e.g. 5.25) and
+    `maturity_date_str` (ISO "YYYY-MM-DD") are the user-supplied bond terms. When
+    both are given they build the profile directly — the free manual-entry path,
+    used because the Finnhub coupon/maturity lookup is premium-gated (disabled).
 
     Returns a dict with keys: cusip, grade, is_high_grade, ytm, spread_bps,
     bond_type. Grade is one of "AAA" | "AA" | "A" | "BBB" | "High Yield / Junk"
@@ -515,11 +570,15 @@ def classify_bond(cusip: str, session: Session, fred_api_key: str) -> dict:
         "bond_type": "unknown",
     }
 
+    print(f"[BOND] classify_bond start cusip={cusip} price_per_100={price_per_100}", flush=True)
+
     if not cusip:
+        print("[BOND] empty cusip -> Unclassified", flush=True)
         return unclassified
 
     # Tier 1: Treasury confirmation
     if is_treasury(cusip):
+        print(f"[BOND] {cusip}: is_treasury=True -> grade=AAA (treasury short-circuit; no YTM)", flush=True)
         return {
             "cusip": cusip,
             "grade": "AAA",
@@ -529,17 +588,53 @@ def classify_bond(cusip: str, session: Session, fred_api_key: str) -> dict:
             "bond_type": "treasury",
         }
 
-    # Tier 2: profile + YTM-based grade inference
-    profile = get_bond_profile(cusip, session)
-    if not profile:
-        return unclassified
+    # Tier 2: build the bond profile. Prefer the user-supplied coupon + maturity (the
+    # free manual-entry path). Only fall back to get_bond_profile (the Finnhub lookup,
+    # currently premium-gated / disabled) when the user didn't provide them.
+    if coupon_rate_pct is not None and maturity_date_str:
+        try:
+            coupon_rate = float(coupon_rate_pct) / 100.0  # percent -> decimal
+            maturity_date = datetime.strptime(maturity_date_str, "%Y-%m-%d").date()
+        except (ValueError, TypeError):
+            print(f"[BOND] {cusip}: bad coupon/maturity input -> Unclassified", flush=True)
+            return unclassified
+        if coupon_rate <= 0:
+            print(f"[BOND] {cusip}: coupon<=0 -> Unclassified", flush=True)
+            return unclassified
+        profile = {
+            "coupon_rate": coupon_rate,
+            "maturity_date": maturity_date,
+            "face_value": DEFAULT_FACE_VALUE,
+            "bond_type": "corporate",
+        }
+        print(
+            f"[BOND] {cusip}: using user-entered coupon_rate={coupon_rate} maturity={maturity_date}",
+            flush=True,
+        )
+    else:
+        profile = get_bond_profile(cusip, session)
+        if not profile:
+            print(
+                f"[BOND] {cusip}: no coupon/maturity input and no Finnhub profile -> "
+                f"Unclassified (FINNHUB_API_KEY set? {bool(os.getenv('FINNHUB_API_KEY'))})",
+                flush=True,
+            )
+            return unclassified
+        print(
+            f"[BOND] {cusip}: profile coupon_rate={profile['coupon_rate']} "
+            f"maturity={profile['maturity_date']} face={profile['face_value']} "
+            f"type={profile['bond_type']}",
+            flush=True,
+        )
 
     face_value = profile["face_value"]
     coupon_rate = profile["coupon_rate"]
     maturity_date = profile["maturity_date"]
     maturity_years = (maturity_date - date.today()).days / 365.25
+    print(f"[BOND] {cusip}: maturity_years={maturity_years:.3f}", flush=True)
 
     if maturity_years <= 0:
+        print(f"[BOND] {cusip}: matured (years<=0) -> grade=Matured", flush=True)
         return {
             "cusip": cusip,
             "grade": "Matured",
@@ -553,17 +648,37 @@ def classify_bond(cusip: str, session: Session, fred_api_key: str) -> dict:
     # annual total, only the periodic-payment size, so no annualise_coupon call is
     # needed here. The helper is kept for direct unit testing.
     coupon_annual = coupon_rate * face_value
-    # No free per-CUSIP price source exists, so price defaults to par. This makes
-    # YTM ≈ coupon rate (see disabled FINRA price code above / known limitation).
-    price = face_value
+    # Use the user-supplied market price (quoted per 100 of par) when given, so YTM
+    # reflects the real discount/premium. No free per-CUSIP price source exists (see
+    # disabled FINRA code above), so without a user price we fall back to par, which
+    # collapses YTM to the coupon rate.
+    if price_per_100 is not None and price_per_100 > 0:
+        price = (price_per_100 / 100.0) * face_value
+    else:
+        price = face_value
     ytm = calculate_ytm(price, face_value, coupon_annual, maturity_years)
+    print(
+        f"[BOND] {cusip}: price={price} coupon_annual={coupon_annual} "
+        f"ytm={ytm:.6f} ({ytm * 100:.4f}%)",
+        flush=True,
+    )
 
-    curve = get_treasury_curve(fred_api_key)
+    # Pin the Treasury curve to the purchase date so the spread reflects the
+    # yields as of when the bond was bought, not today's. Falls back to today's
+    # curve when no purchase date was supplied.
+    curve = get_treasury_curve(fred_api_key, as_of_date=purchase_date_str)
     treasury_yield = interpolate_treasury_yield(maturity_years, curve)
     spread_bps = (ytm - treasury_yield) * 10_000.0
+    print(
+        f"[BOND] {cusip}: as_of={purchase_date_str or 'today'} "
+        f"treasury_yield={treasury_yield:.6f} "
+        f"spread_bps={spread_bps:.2f} (curve_points={len(curve)})",
+        flush=True,
+    )
 
-    oas_buckets = get_or_fetch_oas_buckets(session, fred_api_key)
+    oas_buckets = get_or_fetch_oas_buckets(session, fred_api_key, purchase_date_str=purchase_date_str)
     if not oas_buckets:
+        print(f"[BOND] {cusip}: OAS buckets unavailable -> Unclassified (ytm/spread kept)", flush=True)
         return {
             "cusip": cusip,
             "grade": "Unclassified",
@@ -574,6 +689,10 @@ def classify_bond(cusip: str, session: Session, fred_api_key: str) -> dict:
         }
 
     grade, is_high_grade = classify_grade(spread_bps, oas_buckets)
+    print(
+        f"[BOND] {cusip}: oas_buckets={oas_buckets} -> grade={grade} is_high_grade={is_high_grade}",
+        flush=True,
+    )
     return {
         "cusip": cusip,
         "grade": grade,
