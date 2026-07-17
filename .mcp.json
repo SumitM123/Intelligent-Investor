@@ -2,7 +2,14 @@
   "mcpServers": {
     "alphavantage": {
       "type": "http",
-      "url": "https://mcp.alphavantage.co/mcp?apikey=${ALPHA_VANTAGE_API}"
+      "url": "https://mcp.alphavantage.co/mcp?apikey=${ALPHA_VANTAGE_API_MCP}"
+    },
+    "postman": {
+      "type": "http",
+      "url": "https://mcp.postman.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${POSTMAN_API_KEY}"
+      }
     },
     "postgres": {
       "command": "npx",
