@@ -3,9 +3,14 @@ docker-compose.dev.yml
 compose-verifying-stock.yml
 projectRunning.txt
 .env
+.env.*
 toDo.txt
 .claude/settings.local.json
+node_modules/
 __pycache__/
+
+# Pasted Claude Code session transcripts / scratch context dumps
+*_context_before_debug.txt
 playwright-mcp/
 .playwright-mcp/
 screenshots/
