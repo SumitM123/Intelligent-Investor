@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sub-Sequence Illustration with Specify</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: white;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            position: relative;
+        }
+        .title {
+            text-align: center;
+            font-size: 32px;
+            font-weight: bold;
+            color: #1a1a1a;
+            margin-bottom: 30px;
+        }
+
+        /* WORKFLOW SEQUENCE */
+        .workflow-sequence {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 30px;
+            margin-bottom: 0;
+            padding: 30px;
+            background: #f8f9fa;
+            border-radius: 15px;
+        }
+        .workflow-bubble {
+            width: 280px;
+            height: 280px;
+            border-radius: 50%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 30px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.15);
+            position: relative;
+            cursor: pointer;
+            transition: transform 0.3s ease;
+        }
+        .workflow-bubble:hover {
+            transform: scale(1.05);
+        }
+        .workflow-bubble.preflight {
+            background: linear-gradient(135deg, #a8e6cf 0%, #56ab91 100%);
+        }
+        .workflow-bubble.specify {
+            background: linear-gradient(135deg, #ffd93d 0%, #ff6b35 100%);
+            border: 4px solid #d63031;
+        }
+        .workflow-bubble.cyclic {
+            background: linear-gradient(135deg, #a29bfe 0%, #6c5ce7 100%);
+        }
+        .bubble-number {
+            font-size: 48px;
+            font-weight: bold;
+            color: white;
+            margin-bottom: 15px;
+        }
+        .bubble-title {
+            font-size: 22px;
+            font-weight: bold;
+            color: white;
+            margin-bottom: 10px;
+        }
+        .bubble-subtitle {
+            font-size: 14px;
+            color: rgba(255,255,255,0.9);
+            line-height: 1.4;
+        }
+        .arrow-right {
+            font-size: 48px;
+            color: #667eea;
+            font-weight: bold;
+        }
+
+        /* ZOOM-IN CONNECTOR — sits midway between the small and the big bubble */
+        .zoom-connector {
+            display: flex;
+            justify-content: center;
+            margin: 25px 0 55px;
+        }
+        .magnifying-glass {
+            position: relative;
+            width: 60px;
+            height: 60px;
+        }
+        .magnifying-circle {
+            width: 45px;
+            height: 45px;
+            border: 5px solid #d63031;
+            border-radius: 50%;
+            background: linear-gradient(135deg, rgba(255,217,61,0.4) 0%, rgba(255,107,53,0.4) 100%);
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        .magnifying-handle {
+            width: 5px;
+            height: 25px;
+            background: #d63031;
+            position: absolute;
+            bottom: -8px;
+            right: 0;
+            transform: rotate(-45deg);
+            border-radius: 2px;
+        }
+
+        /* ZOOM-IN SECTION */
+        .zoom-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .zoom-bubble {
+            width: 550px;
+            height: 550px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #ffd93d 0%, #ff6b35 100%);
+            border: 6px solid #d63031;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 12px 24px rgba(0,0,0,0.2);
+            color: white;
+        }
+        /* Narrow content column so every row stays inside the circle */
+        .zoom-content {
+            width: 380px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+        }
+        .zoom-title {
+            font-size: 32px;
+            font-weight: bold;
+            letter-spacing: 1px;
+            margin-bottom: 14px;
+        }
+
+        /* STEPS */
+        .step {
+            background: rgba(255,255,255,0.15);
+            border: 2px solid rgba(255,255,255,0.35);
+            border-radius: 12px;
+            padding: 9px 14px;
+            width: 100%;
+        }
+        .step-title {
+            font-size: 15px;
+            font-weight: bold;
+            letter-spacing: 0.3px;
+        }
+        .step.protocol {
+            background: rgba(255,255,255,0.22);
+            border-color: rgba(255,255,255,0.5);
+            padding: 12px 16px;
+        }
+        .step.protocol .step-title {
+            font-size: 16px;
+            margin-bottom: 8px;
+        }
+        .step-list {
+            list-style: none;
+            text-align: left;
+            font-size: 13.5px;
+            line-height: 1.55;
+        }
+        .step-list li {
+            margin-bottom: 4px;
+            padding-left: 17px;
+            position: relative;
+        }
+        .step-list li:last-child {
+            margin-bottom: 0;
+        }
+        .step-list li:before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            font-weight: bold;
+        }
+
+        /* DOWNWARD ARROWS BETWEEN STEPS */
+        .step-arrow {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 7px 0;
+        }
+        .step-arrow .stem {
+            width: 3px;
+            height: 10px;
+            background: rgba(255,255,255,0.85);
+            border-radius: 2px;
+        }
+        .step-arrow .head {
+            width: 0;
+            height: 0;
+            border-left: 7px solid transparent;
+            border-right: 7px solid transparent;
+            border-top: 8px solid rgba(255,255,255,0.9);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="title">Sub-Sequence Illustration with Specify</div>
+
+        <!-- WORKFLOW SEQUENCE -->
+        <div class="workflow-sequence">
+            <div class="workflow-bubble preflight">
+                <div class="bubble-number">1</div>
+                <div class="bubble-title">PREFLIGHT</div>
+                <div class="bubble-subtitle">
+                    Validate prerequisites<br>
+                    Extract metadata<br>
+                    Confirm approach
+                </div>
+            </div>
+
+            <div class="arrow-right">→</div>
+
+            <div class="workflow-bubble specify">
+                <div class="bubble-number">2</div>
+                <div class="bubble-title">SPECIFY</div>
+                <div class="bubble-subtitle">
+                    Generate artifacts<br>
+                    <strong>+ Architectural Decisions</strong><br>
+                    7 specification files
+                </div>
+            </div>
+
+            <div class="arrow-right">→</div>
+
+            <div class="workflow-bubble cyclic">
+                <div class="bubble-number">3</div>
+                <div class="bubble-title">CYCLIC<br>CROSS-CHECK</div>
+                <div class="bubble-subtitle">
+                    Automated validation<br>
+                    Review-fix loops<br>
+                    Quality assurance
+                </div>
+            </div>
+        </div>
+
+        <!-- ZOOM-IN CONNECTOR -->
+        <div class="zoom-connector">
+            <div class="magnifying-glass">
+                <div class="magnifying-circle"></div>
+                <div class="magnifying-handle"></div>
+            </div>
+        </div>
+
+        <!-- ZOOM-IN SECTION -->
+        <div class="zoom-section">
+            <div class="zoom-bubble">
+                <div class="zoom-content">
+                    <div class="zoom-title">SPECIFY</div>
+
+                    <div class="step">
+                        <div class="step-title">EXTRACT SOURCE METRICS</div>
+                    </div>
+
+                    <div class="step-arrow"><div class="stem"></div><div class="head"></div></div>
+
+                    <div class="step protocol">
+                        <div class="step-title">ARCHITECTURAL DECISION PROTOCOL</div>
+                        <ul class="step-list">
+                            <li>Detects ambiguities (8-point check)</li>
+                            <li>STOPS when approaches conflict</li>
+                            <li>Presents 2-4 options</li>
+                            <li>Records choice in notes.md</li>
+                        </ul>
+                    </div>
+
+                    <div class="step-arrow"><div class="stem"></div><div class="head"></div></div>
+
+                    <div class="step">
+                        <div class="step-title">GENERATE STRUCTURED FILES</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
