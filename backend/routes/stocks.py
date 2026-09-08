@@ -66,13 +66,36 @@ def _fetch_etf_top_holdings(symbol: str) -> list[dict]:
     return out
 
 
+def _is_bond_etf(symbol: str) -> bool:
+    """True when an ETF holds more fixed income than equity.
+
+    A bond ETF (BND, AGG, …) is a fixed-income holding, so it belongs on the
+    bonds side of Graham's 50/50 rule. Counting one as stock skews every
+    allocation signal the app produces, so this is deliberately checked rather
+    than inferred from the ticker. Falls back to False (equity ETF) whenever
+    yfinance can't answer — the pre-existing behaviour.
+    """
+    try:
+        classes = yf.Ticker(symbol).funds_data.asset_classes
+    except Exception as exc:
+        print(f"[YF ERR] asset_classes symbol={symbol} exc={exc}", flush=True)
+        return False
+    if not isinstance(classes, dict):
+        return False
+    try:
+        return float(classes.get("bondPosition") or 0) > float(classes.get("stockPosition") or 0)
+    except (TypeError, ValueError):
+        return False
+
+
 def resolve_symbols(symbols: list[str]) -> dict[str, tuple]:
-    """Resolve (sector, industry, is_etf) for each symbol.
+    """Resolve (sector, industry, is_etf, is_bond_etf) for each symbol.
 
     Reads the `stock_industry` cache first, falls back to FMP /profile for cache
-    misses, and persists the misses. Returns {symbol: (sector, industry, is_etf)};
-    symbols FMP can't resolve are simply omitted. ETFs store sector/industry as
-    "N/A" — their composition is fetched live elsewhere.
+    misses, and persists the misses. Returns
+    {symbol: (sector, industry, is_etf, is_bond_etf)}; symbols FMP can't resolve
+    are simply omitted. ETFs store sector/industry as "N/A" — their composition
+    is fetched live elsewhere.
     """
     if not symbols:
         return {}
@@ -81,7 +104,7 @@ def resolve_symbols(symbols: list[str]) -> dict[str, tuple]:
         cached_rows = session.execute(
             text(
                 """
-                SELECT stock_symbol, sector, industry, is_etf
+                SELECT stock_symbol, sector, industry, is_etf, is_bond_etf
                 FROM stock_industry
                 WHERE stock_symbol = ANY(:symbols)
                 """
@@ -89,7 +112,7 @@ def resolve_symbols(symbols: list[str]) -> dict[str, tuple]:
             {"symbols": symbols},
         ).all()
 
-    cache: dict[str, tuple] = {row[0]: (row[1], row[2], row[3]) for row in cached_rows}
+    cache: dict[str, tuple] = {row[0]: (row[1], row[2], row[3], row[4]) for row in cached_rows}
     missing = [s for s in symbols if s not in cache]
     if not missing:
         return cache
@@ -107,18 +130,22 @@ def resolve_symbols(symbols: list[str]) -> dict[str, tuple]:
         is_etf = bool(entry.get("isEtf"))
         if is_etf:
             # ETF composition shifts too often to cache locally; callers fetch
-            # fresh weights / holdings from yfinance per request.
+            # fresh weights / holdings from yfinance per request. Which side of
+            # the 50/50 rule the fund sits on, though, is stable enough to cache.
             sector, industry = "N/A", "N/A"
+            is_bond_etf = _is_bond_etf(sym)
         else:
             sector = entry.get("sector") or None
             industry = entry.get("industry") or None
+            is_bond_etf = False
         to_insert.append({
             "stock_symbol": sym,
             "sector": sector,
             "industry": industry,
             "is_etf": is_etf,
+            "is_bond_etf": is_bond_etf,
         })
-        cache[sym] = (sector, industry, is_etf)
+        cache[sym] = (sector, industry, is_etf, is_bond_etf)
 
     if to_insert:
         with SessionLocal() as session:
@@ -127,8 +154,8 @@ def resolve_symbols(symbols: list[str]) -> dict[str, tuple]:
                     session.execute(
                         text(
                             """
-                            INSERT INTO stock_industry (stock_symbol, sector, industry, is_etf)
-                            VALUES (:stock_symbol, :sector, :industry, :is_etf)
+                            INSERT INTO stock_industry (stock_symbol, sector, industry, is_etf, is_bond_etf)
+                            VALUES (:stock_symbol, :sector, :industry, :is_etf, :is_bond_etf)
                             ON CONFLICT (stock_symbol) DO NOTHING
                             """
                         ),
@@ -196,7 +223,7 @@ def receiveDiversification(
     diversification = []
     etfs: list[dict] = []
     for sym in requested:
-        sector, industry, is_etf = cache.get(sym, (None, None, False))
+        sector, industry, is_etf, _is_bond = cache.get(sym, (None, None, False, False))
         if is_etf:
             weights = _fetch_etf_weights(sym)
             etfs.append({sym: weights if weights is not None else {}})

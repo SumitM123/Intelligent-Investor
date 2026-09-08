@@ -10,6 +10,10 @@ The stocks half comes from one SnapTrade account's positions (only when
 `bonds_table` keyed on `(user_id, is_defensive)` and is independent of any
 brokerage account. Missing/disconnected SnapTrade is never an error — the stocks
 half is simply empty.
+
+Bond ETFs are the one brokerage holding that crosses over: they are fixed income,
+so they are returned separately as `bond_etfs` and counted in `bonds_total`
+rather than `stocks_total`, keeping the 50/50 stocks-to-bonds reading honest.
 """
 
 from typing import Annotated, Optional
@@ -43,7 +47,9 @@ def portfolio_breakdown(
     """Aggregate one account's stock positions + the user's bonds into one payload."""
     equities: list[dict] = []
     etfs: list[dict] = []
+    bond_etfs: list[dict] = []
     stocks_total = 0.0
+    bond_etfs_total = 0.0
 
     # --- Stocks half: a single SnapTrade account's positions ---
     positions: list[dict] = []
@@ -61,15 +67,25 @@ def portfolio_breakdown(
         for p in positions:
             symbol = p["symbol"]
             market_value = _safe_float(p.get("market_value"))
-            stocks_total += market_value
-            sector, industry, is_etf = resolved.get(symbol, (None, None, False))
+            sector, industry, is_etf, is_bond_etf = resolved.get(
+                symbol, (None, None, False, False)
+            )
             if is_etf:
-                etfs.append({
+                node = {
                     "symbol": symbol,
                     "market_value": market_value,
                     "top_holdings": _fetch_etf_top_holdings(symbol),
-                })
+                }
+                if is_bond_etf:
+                    # A bond fund is fixed income: it belongs on the bonds side
+                    # of the 50/50 rule even though it trades as an ETF.
+                    bond_etfs.append(node)
+                    bond_etfs_total += market_value
+                else:
+                    etfs.append(node)
+                    stocks_total += market_value
             else:
+                stocks_total += market_value
                 equities.append({
                     "symbol": symbol,
                     "market_value": market_value,
@@ -112,8 +128,11 @@ def portfolio_breakdown(
 
     return {
         "stocks_total": round(stocks_total, 2),
-        "bonds_total": round(bonds_total, 2),
+        # Bond ETFs are brokerage-held fixed income, so they join the manually
+        # entered bonds in the bonds total rather than the stocks total.
+        "bonds_total": round(bonds_total + bond_etfs_total, 2),
         "equities": equities,
         "etfs": etfs,
+        "bond_etfs": bond_etfs,
         "bonds_by_grade": bonds_by_grade,
     }

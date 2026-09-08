@@ -67,16 +67,21 @@ CREATE TABLE IF NOT EXISTS leading_stock_analysis (
 -- Looked up on every /api/stocks/receiveDiversification request before calling FMP.
 -- For ETFs, sector and industry are stored as 'N/A'; sector weights are fetched
 -- live from yfinance per request (not cached, since ETF composition shifts).
+-- is_bond_etf marks funds holding more fixed income than equity (yfinance
+-- asset_classes): they count toward the bonds side of the 50/50 rule, not stocks.
 CREATE TABLE IF NOT EXISTS stock_industry (
     stock_symbol TEXT PRIMARY KEY,
     sector       TEXT,
     industry     TEXT,
-    is_etf       BOOLEAN NOT NULL DEFAULT false
+    is_etf       BOOLEAN NOT NULL DEFAULT false,
+    is_bond_etf  BOOLEAN NOT NULL DEFAULT false
 );
 
--- Backfill the column for installations that pre-date it.
+-- Backfill the columns for installations that pre-date them.
 ALTER TABLE stock_industry
     ADD COLUMN IF NOT EXISTS is_etf BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE stock_industry
+    ADD COLUMN IF NOT EXISTS is_bond_etf BOOLEAN NOT NULL DEFAULT false;
 
 -- Per-user bond holdings, partitioned by investor type (defensive vs enterprising).
 -- Composite PK matches ON CONFLICT (user_id, is_defensive) in bonds.py upsert.
