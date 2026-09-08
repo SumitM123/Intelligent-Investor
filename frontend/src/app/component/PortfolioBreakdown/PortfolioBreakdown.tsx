@@ -14,7 +14,9 @@ interface Props {
   hasSnapTradeUser: boolean;
 }
 
-type StockHalf = Pick<Breakdown, "stocks_total" | "equities" | "etfs">;
+// Everything the backend contributes: the stocks half, plus the bond ETFs that
+// belong to the bonds half but can only come from the brokerage account.
+type StockHalf = Pick<Breakdown, "stocks_total" | "equities" | "etfs" | "bond_etfs">;
 
 export default function PortfolioBreakdown({ isDefensive, hasSnapTradeUser }: Props) {
   const { bonds } = usePortfolioBonds();
@@ -85,6 +87,7 @@ export default function PortfolioBreakdown({ isDefensive, hasSnapTradeUser }: Pr
           stocks_total: data.stocks_total,
           equities: data.equities ?? [],
           etfs: data.etfs ?? [],
+          bond_etfs: data.bond_etfs ?? [],
         });
       } catch (e) {
         if (!cancelled) {
@@ -105,19 +108,22 @@ export default function PortfolioBreakdown({ isDefensive, hasSnapTradeUser }: Pr
     reset();
   }, [selectedAccountId, reset]);
 
-  // Bonds half is derived from the shared BondList state (reactive to edits).
+  // Bonds half is derived from the shared BondList state (reactive to edits),
+  // then joined by any brokerage-held bond ETFs from the backend.
   const { byGrade, total: bondsTotal } = useMemo(() => bondsToByGrade(bonds), [bonds]);
 
-  const breakdown: Breakdown = useMemo(
-    () => ({
+  const breakdown: Breakdown = useMemo(() => {
+    const bondEtfs = stockHalf?.bond_etfs ?? [];
+    const bondEtfTotal = bondEtfs.reduce((a, e) => a + e.market_value, 0);
+    return {
       stocks_total: stockHalf?.stocks_total ?? 0,
-      bonds_total: bondsTotal,
+      bonds_total: bondsTotal + bondEtfTotal,
       equities: stockHalf?.equities ?? [],
       etfs: stockHalf?.etfs ?? [],
+      bond_etfs: bondEtfs,
       bonds_by_grade: byGrade,
-    }),
-    [stockHalf, bondsTotal, byGrade],
-  );
+    };
+  }, [stockHalf, bondsTotal, byGrade]);
 
   const slices = useMemo(() => slicesFor(current, breakdown, push), [current, breakdown, push]);
 

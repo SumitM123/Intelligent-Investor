@@ -8,6 +8,9 @@ export { gradeTone } from "@/app/component/BondList/gradeTone";
 export const STOCKS_COLOR = "#3b82f6"; // blue-500
 export const BONDS_COLOR = "#10b981"; // emerald-500
 export const ETF_COLOR = "#6366f1"; // indigo-500
+// Teal reads as a bond-side green while staying distinct from the grade colors
+// it shares the L1B ring with (AAA/AA emerald, A blue).
+export const BOND_ETF_COLOR = "#14b8a6"; // teal-500
 
 const PALETTE = [
   "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6",

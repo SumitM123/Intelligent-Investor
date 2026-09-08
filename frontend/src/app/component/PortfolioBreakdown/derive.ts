@@ -3,7 +3,7 @@
 // PieView stay presentational and makes the levels trivially testable.
 
 import type { BondEntry } from "@/app/component/BondList/BondList";
-import { STOCKS_COLOR, BONDS_COLOR, ETF_COLOR, pickColor, gradeColor } from "./colors";
+import { STOCKS_COLOR, BONDS_COLOR, ETF_COLOR, BOND_ETF_COLOR, pickColor, gradeColor } from "./colors";
 import type { Breakdown, BondNode, Frame, Slice } from "./types";
 
 // Build the bonds half of the breakdown from the shared BondList state so it
@@ -56,6 +56,8 @@ export function frameLabel(frame: Frame): string {
       return "Equities";
     case "L2T":
       return "ETFs";
+    case "L2BE":
+      return "Bond ETFs";
     case "L2B":
       return frame.grade;
     case "L3E":
@@ -79,6 +81,8 @@ export function titleFor(frame: Frame): string {
       return "Equities by sector";
     case "L2T":
       return "ETFs by position";
+    case "L2BE":
+      return "Bond ETFs by position";
     case "L2B":
       return `${frame.grade} bonds`;
     case "L3E":
@@ -176,8 +180,11 @@ export function slicesFor(frame: Frame, bd: Breakdown, push: (f: Frame) => void)
     }
 
     case "L3T": {
-      // Leaf: top holdings inside the chosen ETF (weights, not dollars).
-      const etf = bd.etfs.find((e) => e.symbol === frame.etfSymbol);
+      // Leaf: top holdings inside the chosen ETF (weights, not dollars). The
+      // ETF may sit on either half, so search both lists.
+      const etf =
+        bd.etfs.find((e) => e.symbol === frame.etfSymbol) ??
+        bd.bond_etfs.find((e) => e.symbol === frame.etfSymbol);
       if (!etf) return [];
       return etf.top_holdings.map((h) => ({
         label: h.symbol,
@@ -188,11 +195,32 @@ export function slicesFor(frame: Frame, bd: Breakdown, push: (f: Frame) => void)
     }
 
     case "L1B": {
-      return Object.entries(bd.bonds_by_grade).map(([grade, list]) => ({
+      const slices: Slice[] = Object.entries(bd.bonds_by_grade).map(([grade, list]) => ({
         label: grade,
         value: list.reduce((a, b) => a + b.bond_value, 0),
         color: gradeColor(grade),
         onClick: () => push({ level: "L2B", grade }),
+      }));
+      // Brokerage-held fixed income sits alongside the credit-grade groups
+      // rather than inside one — a fund has no single CUSIP or grade.
+      const bondEtfTotal = bd.bond_etfs.reduce((a, e) => a + e.market_value, 0);
+      if (bondEtfTotal > 0) {
+        slices.push({
+          label: "Bond ETFs",
+          value: bondEtfTotal,
+          color: BOND_ETF_COLOR,
+          onClick: () => push({ level: "L2BE" }),
+        });
+      }
+      return slices;
+    }
+
+    case "L2BE": {
+      return bd.bond_etfs.map((e) => ({
+        label: e.symbol,
+        value: e.market_value,
+        color: pickColor(e.symbol),
+        onClick: () => push({ level: "L3T", etfSymbol: e.symbol }),
       }));
     }
 
