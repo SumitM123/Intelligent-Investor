@@ -66,6 +66,51 @@ def _fetch_etf_top_holdings(symbol: str) -> list[dict]:
     return out
 
 
+# yfinance bond_ratings buckets, in credit order. `us_government` is deliberately
+# excluded: it is an overlapping issuer statistic rather than a rating bucket.
+# These eight sum to 1.0 on their own (verified against BND/AGG/TLT/HYG), so
+# including it would inflate the pie — TLT alone would total ~199%.
+_BOND_RATING_LABELS = [
+    ("aaa", "AAA"),
+    ("aa", "AA"),
+    ("a", "A"),
+    ("bbb", "BBB"),
+    ("bb", "BB"),
+    ("b", "B"),
+    ("below_b", "Below B"),
+    ("other", "Other"),
+]
+
+
+def _fetch_bond_etf_ratings(symbol: str) -> list[dict]:
+    """Return [{grade, weight_pct}] describing a bond fund's credit quality.
+
+    Bond funds hold thousands of individual issues, so yfinance exposes no
+    top_holdings for them. Credit quality is the meaningful composition to chart
+    instead, and it lands on the same grade vocabulary the manually entered
+    bonds already use. Returns [] on any failure, matching _fetch_etf_top_holdings.
+    """
+    try:
+        ratings = yf.Ticker(symbol).funds_data.bond_ratings
+    except Exception as exc:
+        print(f"[YF ERR] bond_ratings symbol={symbol} exc={exc}", flush=True)
+        return []
+    if not isinstance(ratings, dict):
+        return []
+    out: list[dict] = []
+    for key, label in _BOND_RATING_LABELS:
+        try:
+            weight = float(ratings.get(key) or 0)
+        except (TypeError, ValueError):
+            continue
+        # Drop empty buckets, and slivers that would render as an invisible
+        # wedge with a "0.0%" legend row (BND's unrated residual is 0.03%).
+        if weight * 100 < 0.05:
+            continue
+        out.append({"grade": label, "weight_pct": round(weight * 100, 2)})
+    return out
+
+
 def _is_bond_etf(symbol: str) -> bool:
     """True when an ETF holds more fixed income than equity.
 

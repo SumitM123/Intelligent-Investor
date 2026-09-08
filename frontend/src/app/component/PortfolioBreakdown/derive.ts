@@ -63,6 +63,7 @@ export function frameLabel(frame: Frame): string {
     case "L3E":
       return frame.sector;
     case "L3T":
+    case "L3BE":
       return frame.etfSymbol;
     case "L3B":
       return frame.cusip;
@@ -89,14 +90,17 @@ export function titleFor(frame: Frame): string {
       return `${frame.sector} stocks`;
     case "L3T":
       return `${frame.etfSymbol} top holdings`;
+    case "L3BE":
+      return `${frame.etfSymbol} credit quality`;
     case "L3B":
       return `Bond ${frame.cusip}`;
   }
 }
 
-// Whether the current level's values are dollars or percentages (ETF holdings).
+// Whether the current level's values are dollars or percentages (the ETF leaves
+// — holdings weights and credit-quality weights — are the percentage ones).
 export function unitFor(frame: Frame): "usd" | "pct" {
-  return frame.level === "L3T" ? "pct" : "usd";
+  return frame.level === "L3T" || frame.level === "L3BE" ? "pct" : "usd";
 }
 
 export function slicesFor(frame: Frame, bd: Breakdown, push: (f: Frame) => void): Slice[] {
@@ -220,7 +224,20 @@ export function slicesFor(frame: Frame, bd: Breakdown, push: (f: Frame) => void)
         label: e.symbol,
         value: e.market_value,
         color: pickColor(e.symbol),
-        onClick: () => push({ level: "L3T", etfSymbol: e.symbol }),
+        onClick: () => push({ level: "L3BE", etfSymbol: e.symbol }),
+      }));
+    }
+
+    case "L3BE": {
+      // Leaf: a bond fund's credit-quality mix (weights, not dollars). Graded
+      // colors keep it visually consistent with the manual bonds' grade ring.
+      const etf = bd.bond_etfs.find((e) => e.symbol === frame.etfSymbol);
+      if (!etf) return [];
+      return etf.credit_quality.map((r) => ({
+        label: r.grade,
+        value: r.weight_pct,
+        color: gradeColor(r.grade),
+        onClick: () => {},
       }));
     }
 

@@ -258,6 +258,10 @@ export default function PortfolioBreakdown({ isDefensive, hasSnapTradeUser }: Pr
             <div className="rounded-lg border border-dashed border-[var(--border-strong)] bg-[var(--surface-muted)] p-8 text-center text-sm text-[var(--muted)]">
               Top holdings not available for {current.etfSymbol}.
             </div>
+          ) : current.level === "L3BE" && slices.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-[var(--border-strong)] bg-[var(--surface-muted)] p-8 text-center text-sm text-[var(--muted)]">
+              Credit quality not available for {current.etfSymbol}.
+            </div>
           ) : (
             <PieView slices={slices} unit={unitFor(current)} />
           )}
