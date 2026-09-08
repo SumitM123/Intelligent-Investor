@@ -80,6 +80,12 @@ ALTER TABLE stock_industry
 
 -- Per-user bond holdings, partitioned by investor type (defensive vs enterprising).
 -- Composite PK matches ON CONFLICT (user_id, is_defensive) in bonds.py upsert.
+-- `bonds` is a JSONB array; each element is one bond with the shape:
+--   {cusip, grade, is_high_grade, ytm, spread_bps, bond_type,
+--    treasury_yield, maturity_date,        -- from classify_bond (bond_classifier.py)
+--    purchase_price, quantity}             -- user-entered in BondList; value = price*qty
+-- treasury_yield is the interpolated curve point at maturity (percent) or null;
+-- maturity_date is an ISO date string or null. No DDL needed for new fields (JSONB).
 CREATE TABLE IF NOT EXISTS bonds_table (
     user_id      UUID NOT NULL REFERENCES users_id(user_id) ON DELETE CASCADE,
     is_defensive BOOLEAN NOT NULL,
