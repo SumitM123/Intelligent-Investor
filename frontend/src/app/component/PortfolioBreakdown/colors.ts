@@ -19,11 +19,13 @@ const PALETTE = [
 ];
 
 // Concrete grade colors aligned with gradeTone's intent (AAA/AA green, A blue,
-// BBB amber, Matured/Unclassified gray, High Yield / Junk red).
+// BBB amber, Matured/Unclassified/Other gray, High Yield / Junk red).
 export function gradeColor(grade?: string): string {
   const g = (grade ?? "").toUpperCase();
   if (g.startsWith("AAA") || g.startsWith("AA")) return "#10b981";
-  if (g.startsWith("MATURED") || g.startsWith("UNCLASS")) return "#9ca3af";
+  // "OTHER" is a bond fund's unrated residual — gray, not the junk red it
+  // would otherwise fall through to.
+  if (g.startsWith("MATURED") || g.startsWith("UNCLASS") || g.startsWith("OTHER")) return "#9ca3af";
   if (g.startsWith("A")) return "#3b82f6";
   if (g.startsWith("BBB")) return "#f59e0b";
   return "#ef4444";

@@ -18,6 +18,17 @@ export interface EtfPosition {
   top_holdings: TopHolding[];
 }
 
+export interface RatingWeight {
+  grade: string;
+  weight_pct: number;
+}
+
+// A bond fund holds thousands of issues, so it carries no top_holdings; its
+// composition is charted as credit quality instead.
+export interface BondEtfPosition extends EtfPosition {
+  credit_quality: RatingWeight[];
+}
+
 export interface BondNode {
   cusip: string;
   grade: string;
@@ -41,7 +52,7 @@ export interface Breakdown {
   bonds_total: number;
   equities: EquityPosition[];
   etfs: EtfPosition[];
-  bond_etfs: EtfPosition[];
+  bond_etfs: BondEtfPosition[];
   bonds_by_grade: Record<string, BondNode[]>;
 }
 
@@ -52,8 +63,8 @@ export interface AccountOption {
 }
 
 // One frame of the drill stack. The top frame is the level currently on screen.
-// L2BE lists the bond ETFs sitting under the bonds half; its leaf reuses L3T,
-// since an ETF's top holdings render identically on either side.
+// L2BE lists the bond ETFs sitting under the bonds half, and L3BE is their leaf:
+// a bond fund charts credit quality where an equity ETF (L3T) charts holdings.
 export type Frame =
   | { level: "L0" }
   | { level: "L1S" }
@@ -64,6 +75,7 @@ export type Frame =
   | { level: "L2B"; grade: string }
   | { level: "L3E"; sector: string }
   | { level: "L3T"; etfSymbol: string }
+  | { level: "L3BE"; etfSymbol: string }
   | { level: "L3B"; cusip: string };
 
 export interface Slice {

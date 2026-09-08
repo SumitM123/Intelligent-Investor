@@ -24,7 +24,7 @@ from sqlalchemy import text
 
 from database import SessionLocal
 from routes.snapTrade import fetch_positions_for_account
-from routes.stocks import resolve_symbols, _fetch_etf_top_holdings
+from routes.stocks import resolve_symbols, _fetch_etf_top_holdings, _fetch_bond_etf_ratings
 
 
 router = APIRouter(prefix="/api/portfolio")
@@ -71,18 +71,23 @@ def portfolio_breakdown(
                 symbol, (None, None, False, False)
             )
             if is_etf:
-                node = {
-                    "symbol": symbol,
-                    "market_value": market_value,
-                    "top_holdings": _fetch_etf_top_holdings(symbol),
-                }
                 if is_bond_etf:
                     # A bond fund is fixed income: it belongs on the bonds side
-                    # of the 50/50 rule even though it trades as an ETF.
-                    bond_etfs.append(node)
+                    # of the 50/50 rule even though it trades as an ETF. It also
+                    # exposes no top_holdings, so it drills into credit quality.
+                    bond_etfs.append({
+                        "symbol": symbol,
+                        "market_value": market_value,
+                        "top_holdings": [],
+                        "credit_quality": _fetch_bond_etf_ratings(symbol),
+                    })
                     bond_etfs_total += market_value
                 else:
-                    etfs.append(node)
+                    etfs.append({
+                        "symbol": symbol,
+                        "market_value": market_value,
+                        "top_holdings": _fetch_etf_top_holdings(symbol),
+                    })
                     stocks_total += market_value
             else:
                 stocks_total += market_value
