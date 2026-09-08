@@ -4,6 +4,8 @@ import { useCallback, useState } from "react";
 import StockSearchBar from "@/app/component/Stock Search Bar/StockSearchBar";
 import ConnectionURL from "@/app/component/ConnectionURL/connectionURL";
 import BondList, { type BondEntry } from "@/app/component/BondList/BondList";
+import { PortfolioProvider } from "@/app/component/PortfolioBreakdown/PortfolioProvider";
+import PortfolioBreakdown from "@/app/component/PortfolioBreakdown/PortfolioBreakdown";
 
 const DEFENSIVE_CRITERIA = [
   { code: "1", name: "Adequate size", threshold: "≥ $2B market cap", backendKey: "adequate_size" },
@@ -123,48 +125,54 @@ export default function DefensiveScreener({ initialBonds, hasSnapTradeUser }: Pr
       </aside>
 
       <section className="space-y-6 min-w-0">
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
-          <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
-            <div>
-              <p className="text-[10px] font-semibold tracking-widest text-[var(--muted)] uppercase">
-                Screen a stock
-              </p>
-              <h2 className="mt-1 text-base font-semibold">Test any U.S. ticker against the 7 criteria</h2>
+        <PortfolioProvider initialBonds={initialBonds}>
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
+            <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
+              <div>
+                <p className="text-[10px] font-semibold tracking-widest text-[var(--muted)] uppercase">
+                  Screen a stock
+                </p>
+                <h2 className="mt-1 text-base font-semibold">Test any U.S. ticker against the 7 criteria</h2>
+              </div>
+              <kbd className="hidden md:inline-flex items-center gap-1 px-2 py-1 rounded border border-[var(--border)] text-[11px] font-mono text-[var(--muted)]">
+                ⌘K to focus
+              </kbd>
             </div>
-            <kbd className="hidden md:inline-flex items-center gap-1 px-2 py-1 rounded border border-[var(--border)] text-[11px] font-mono text-[var(--muted)]">
-              ⌘K to focus
-            </kbd>
+            <StockSearchBar onSubmit={handleScreen} submitting={loading} />
+            {error && <p className="mt-3 text-xs text-[var(--fail)]">{error}</p>}
+            {result && (
+              <p className="mt-3 text-xs tabular text-[var(--muted)]">
+                {result.symbol}:{" "}
+                <span className={result.is_leading ? "text-[var(--pass)] font-semibold" : "text-[var(--fail)] font-semibold"}>
+                  {result.is_leading ? "Passes all 7" : "Fails the screen"}
+                </span>
+              </p>
+            )}
           </div>
-          <StockSearchBar onSubmit={handleScreen} submitting={loading} />
-          {error && <p className="mt-3 text-xs text-[var(--fail)]">{error}</p>}
-          {result && (
-            <p className="mt-3 text-xs tabular text-[var(--muted)]">
-              {result.symbol}:{" "}
-              <span className={result.is_leading ? "text-[var(--pass)] font-semibold" : "text-[var(--fail)] font-semibold"}>
-                {result.is_leading ? "Passes all 7" : "Fails the screen"}
-              </span>
-            </p>
-          )}
-        </div>
 
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
-          <div className="flex items-start justify-between gap-4 mb-4 flex-wrap">
-            <div>
-              <p className="text-[10px] font-semibold tracking-widest text-[var(--muted)] uppercase">
-                Brokerage
-              </p>
-              <h2 className="mt-1 text-base font-semibold">Score your real positions</h2>
-              <p className="text-xs text-[var(--muted)] mt-1">
-                Connect via SnapTrade. We never see your credentials and no trades are executed.
-              </p>
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
+            <div className="flex items-start justify-between gap-4 mb-4 flex-wrap">
+              <div>
+                <p className="text-[10px] font-semibold tracking-widest text-[var(--muted)] uppercase">
+                  Brokerage
+                </p>
+                <h2 className="mt-1 text-base font-semibold">Score your real positions</h2>
+                <p className="text-xs text-[var(--muted)] mt-1">
+                  Connect via SnapTrade. We never see your credentials and no trades are executed.
+                </p>
+              </div>
             </div>
+            <ConnectionURL prevPageURL="defensive" hasSnapTradeUser={hasSnapTradeUser} />
           </div>
-          <ConnectionURL prevPageURL="defensive" hasSnapTradeUser={hasSnapTradeUser} />
-        </div>
 
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
-          <BondList initialBonds={initialBonds} isDefensive={true} />
-        </div>
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
+            <PortfolioBreakdown isDefensive={true} hasSnapTradeUser={hasSnapTradeUser} />
+          </div>
+
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
+            <BondList isDefensive={true} />
+          </div>
+        </PortfolioProvider>
       </section>
     </div>
   );
