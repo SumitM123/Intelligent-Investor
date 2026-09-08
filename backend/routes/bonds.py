@@ -2,12 +2,15 @@
 Bonds router.
 
 `POST /api/bonds` syncs the user's bond list for a given investor type
-(`is_defensive=true|false`). The frontend sends the current set of CUSIPs;
-the backend classifies any new CUSIPs via `bond_classifier.classify_bond`,
-reuses cached entries for unchanged CUSIPs, and upserts the full enriched
-list into `bonds_table` as a JSONB array.
+(`is_defensive=true|false`). The frontend sends the current set of bonds, each
+carrying a CUSIP plus the `purchase_price` and `quantity` the user entered; the
+backend classifies any new CUSIPs via `bond_classifier.classify_bond`, reuses
+cached entries for unchanged CUSIPs (splicing in the latest price/quantity), and
+upserts the full enriched list into `bonds_table` as a JSONB array.
 
-`GET /api/bonds?is_defensive=true|false` returns the persisted list.
+`GET /api/bonds?is_defensive=true|false` returns the persisted list. Each entry
+carries `cusip, grade, is_high_grade, ytm, spread_bps, bond_type,
+treasury_yield, maturity_date, purchase_price, quantity`.
 """
 
 import json
@@ -26,8 +29,17 @@ from bond_classifier import classify_bond
 router = APIRouter(prefix="/api/bonds")
 
 
+class BondInput(BaseModel):
+    cusip: str
+    # Optional so re-syncs of legacy rows (which predate these fields) don't 422
+    # at the schema layer; newly-added CUSIPs are still required to supply valid
+    # values in the handler below.
+    purchase_price: float | None = None
+    quantity: float | None = None
+
+
 class BondsSyncRequest(BaseModel):
-    cusips: list[str]
+    bonds: list[BondInput]
     is_defensive: bool
 
 
@@ -38,9 +50,11 @@ def syncBonds(
 ):
     """Replace the user's bond list for the given investor type.
 
-    For each CUSIP in `body.cusips`:
-      - If the CUSIP is already in the stored row, reuse its enriched entry.
-      - Otherwise, call `classify_bond` to look up grade + metrics fresh.
+    For each bond in `body.bonds` (keyed by CUSIP):
+      - If the CUSIP is already in the stored row, reuse its enriched entry and
+        overwrite `purchase_price`/`quantity` when the request supplies them.
+      - Otherwise, call `classify_bond` to look up grade + metrics fresh. A new
+        CUSIP must carry `purchase_price > 0` and `quantity > 0`.
 
     The full enriched array is UPSERTed into `bonds_table` keyed on
     `(user_id, is_defensive)`. Returns the full enriched array.
@@ -52,18 +66,20 @@ def syncBonds(
             detail="FRED_API_KEY is not configured on the server",
         )
 
-    # Normalise + dedupe CUSIPs (case-insensitive, but stored uppercase)
-    cleaned_cusips = []
-    seen = set()
-    for raw in body.cusips:
-        if not isinstance(raw, str):
+    # Normalise + dedupe by CUSIP (case-insensitive, stored uppercase). For a
+    # duplicate CUSIP the last-seen price/quantity wins (treat it as an edit).
+    cleaned: dict[str, dict] = {}
+    order: list[str] = []
+    for item in body.bonds:
+        if not isinstance(item.cusip, str):
             continue
-        c = raw.strip().upper()
-        if not c or c in seen:
+        c = item.cusip.strip().upper()
+        if not c:
             continue
-        seen.add(c)
-        cleaned_cusips.append(c)
-    # continue from here
+        if c not in cleaned:
+            order.append(c)
+        cleaned[c] = {"purchase_price": item.purchase_price, "quantity": item.quantity}
+
     with SessionLocal() as session:
         try:
             existing_row = session.execute(
@@ -81,11 +97,48 @@ def syncBonds(
                         existing_map[entry["cusip"]] = entry
 
             new_bonds = []
-            for cusip in cleaned_cusips:
+            for cusip in order:
+                price = cleaned[cusip]["purchase_price"]
+                qty = cleaned[cusip]["quantity"]
+
                 if cusip in existing_map:
-                    new_bonds.append(existing_map[cusip])
+                    # Reuse the enriched grade/metrics; overwrite price/qty only
+                    # when the request supplied valid values (a user edit).
+                    entry = dict(existing_map[cusip])
+                    if price is not None:
+                        if price <= 0:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"purchase_price must be > 0 for {cusip}",
+                            )
+                        entry["purchase_price"] = price
+                    if qty is not None:
+                        if qty <= 0:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"quantity must be > 0 for {cusip}",
+                            )
+                        entry["quantity"] = qty
+                    # Guarantee the keys exist even for legacy rows that lacked them.
+                    entry.setdefault("purchase_price", price)
+                    entry.setdefault("quantity", qty)
+                    new_bonds.append(entry)
                 else:
-                    new_bonds.append(classify_bond(cusip, session, fred_api_key))
+                    # New CUSIP — price + quantity are required and must be positive.
+                    if price is None or price <= 0:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"purchase_price must be > 0 for new bond {cusip}",
+                        )
+                    if qty is None or qty <= 0:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"quantity must be > 0 for new bond {cusip}",
+                        )
+                    classified = classify_bond(cusip, session, fred_api_key)
+                    classified["purchase_price"] = price
+                    classified["quantity"] = qty
+                    new_bonds.append(classified)
 
             session.execute(
                 text("""
