@@ -247,25 +247,41 @@ def get_user_account_positions(
     return {"positions": fetch_positions_for_account(snapTrade_id, account_id)}
 
 
+def _shape(value) -> str:
+    """Describe a payload's structure (keys/lengths only, never values).
+
+    Used by the positions sanity log so SDK shape drift is diagnosable from the
+    logs without printing anyone's actual holdings.
+    """
+    if isinstance(value, dict):
+        return f"dict{sorted(value.keys())}"
+    if isinstance(value, list):
+        first = value[0] if value else None
+        inner = sorted(first.keys()) if isinstance(first, dict) else type(first).__name__
+        return f"list[{len(value)}] first={inner}"
+    return type(value).__name__
+
+
 def _extract_position_symbol(position: dict) -> str | None:
     """Pull the ticker out of a SnapTrade position, tolerating shape drift.
 
-    SnapTrade nests the universal symbol as position.symbol.symbol.symbol, but
-    some payloads flatten a level or only carry raw_symbol. Try each in turn.
+    SDK 13.x carries it as position.instrument.symbol; older payloads nested it
+    as position.symbol.symbol(.symbol) or only carried raw_symbol. Try each.
     """
-    symbol_field = position.get("symbol")
-    if not isinstance(symbol_field, dict):
-        return None
-    inner = symbol_field.get("symbol")
-    if isinstance(inner, dict):
-        ticker = inner.get("symbol") or inner.get("raw_symbol")
-        if isinstance(ticker, str) and ticker.strip():
-            return ticker.strip().upper()
-    if isinstance(inner, str) and inner.strip():
-        return inner.strip().upper()
-    raw = symbol_field.get("raw_symbol")
-    if isinstance(raw, str) and raw.strip():
-        return raw.strip().upper()
+    for key in ("instrument", "symbol"):
+        field = position.get(key)
+        if not isinstance(field, dict):
+            continue
+        # Ticker sitting directly on this level (SDK 13.x, or a flattened symbol).
+        for candidate in (field.get("symbol"), field.get("raw_symbol")):
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip().upper()
+        # Older nesting: .symbol is itself an object holding the ticker.
+        inner = field.get("symbol")
+        if isinstance(inner, dict):
+            ticker = inner.get("symbol") or inner.get("raw_symbol")
+            if isinstance(ticker, str) and ticker.strip():
+                return ticker.strip().upper()
     return None
 
 
@@ -278,21 +294,35 @@ def fetch_positions_for_account(snapTrade_id: str, account_id: str) -> list[dict
     if not account_id:
         return []
     snaptrade_usersecret_id = getSnapTradeSecretID(snapTrade_id)
-    response = snapTrade.account_information.get_user_account_positions(
+    # get_user_account_positions was removed from the SDK; positions/all is the
+    # replacement (SDK 13.x), and it wraps the position list in "results".
+    response = snapTrade.account_information.get_all_account_positions(
         user_id=snapTrade_id,
         user_secret=snaptrade_usersecret_id,
         account_id=account_id,
     )
     body = getattr(response, "body", response)
-    if isinstance(body, dict):
-        positions = body.get("positions") or body.get("data") or []
-    elif isinstance(body, list):
-        positions = body
+    # SDK 13.x wraps the payload as {"results": ..., "data_freshness": ...}.
+    payload = body.get("results", body) if isinstance(body, dict) else body
+    if isinstance(payload, dict):
+        positions = (
+            payload.get("equity_positions")
+            or payload.get("positions")
+            or payload.get("data")
+            or []
+        )
+    elif isinstance(payload, list):
+        positions = payload
     else:
         positions = []
 
-    # First-call sanity log: verify the symbol nesting against a real payload.
-    print(f"[SNAPTRADE positions] account={account_id} count={len(positions)}", flush=True)
+    # Shape-only sanity log (keys/lengths, never values) to verify nesting
+    # against a real payload without leaking holdings into the logs.
+    print(
+        f"[SNAPTRADE positions] account={account_id} count={len(positions)} "
+        f"payload={_shape(payload)}",
+        flush=True,
+    )
 
     out: list[dict] = []
     for position in positions:
