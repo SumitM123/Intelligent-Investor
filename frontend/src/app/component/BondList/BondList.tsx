@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { gradeTone } from "./gradeTone";
+import { usePortfolioBonds } from "@/app/component/PortfolioBreakdown/PortfolioProvider";
 
 export interface BondEntry {
   cusip: string;
@@ -9,37 +11,46 @@ export interface BondEntry {
   ytm?: number | null;
   spread_bps?: number | null;
   bond_type?: string;
+  purchase_price?: number;
+  quantity?: number;
+  treasury_yield?: number | null;
+  maturity_date?: string | null;
 }
 
 interface BondListProps {
-  initialBonds: BondEntry[];
   isDefensive: boolean;
 }
 
 const CUSIP_REGEX = /^[A-Z0-9]{9}$/;
 
-function gradeTone(grade?: string): { bg: string; text: string; label: string } {
-  if (!grade) return { bg: "var(--surface-muted)", text: "var(--muted)", label: "—" };
-  const g = grade.toUpperCase();
-  if (g.startsWith("AAA") || g.startsWith("AA")) return { bg: "var(--pass-soft)", text: "var(--pass)", label: g };
-  if (g.startsWith("A")) return { bg: "var(--accent-soft)", text: "var(--accent-strong)", label: g };
-  if (g.startsWith("BBB")) return { bg: "var(--warn-soft)", text: "var(--warn)", label: g };
-  return { bg: "var(--fail-soft)", text: "var(--fail)", label: g };
-}
-
-export default function BondList({ initialBonds, isDefensive }: BondListProps) {
-  const [bonds, setBonds] = useState<BondEntry[]>(initialBonds ?? []);
+export default function BondList({ isDefensive }: BondListProps) {
+  // Bonds live in PortfolioProvider so the breakdown chart reacts to edits.
+  const { bonds, setBonds } = usePortfolioBonds();
   const [inputCusip, setInputCusip] = useState("");
+  const [inputPrice, setInputPrice] = useState("");
+  const [inputQty, setInputQty] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const syncToBackend = async (cusips: string[]): Promise<BondEntry[]> => {
+  const priceNum = parseFloat(inputPrice);
+  const qtyNum = parseFloat(inputQty);
+  const inputsValid =
+    CUSIP_REGEX.test(inputCusip.trim().toUpperCase()) && priceNum > 0 && qtyNum > 0;
+
+  const syncToBackend = async (list: BondEntry[]): Promise<BondEntry[]> => {
     const apiBase = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
     const res = await fetch(`${apiBase}/api/bonds`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body: JSON.stringify({ cusips, is_defensive: isDefensive }),
+      body: JSON.stringify({
+        bonds: list.map((b) => ({
+          cusip: b.cusip,
+          purchase_price: b.purchase_price,
+          quantity: b.quantity,
+        })),
+        is_defensive: isDefensive,
+      }),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
@@ -55,6 +66,14 @@ export default function BondList({ initialBonds, isDefensive }: BondListProps) {
       setError("CUSIP must be exactly 9 alphanumeric characters.");
       return;
     }
+    if (!(priceNum > 0)) {
+      setError("Purchase price must be greater than 0.");
+      return;
+    }
+    if (!(qtyNum > 0)) {
+      setError("Quantity must be greater than 0.");
+      return;
+    }
     if (bonds.some((b) => b.cusip === cusip)) {
       setError(`CUSIP ${cusip} is already in the list.`);
       return;
@@ -62,10 +81,14 @@ export default function BondList({ initialBonds, isDefensive }: BondListProps) {
     setError(null);
     setLoading(true);
     const previousBonds = bonds;
-    setBonds([...previousBonds, { cusip }]);
+    const optimistic: BondEntry = { cusip, purchase_price: priceNum, quantity: qtyNum };
+    const next = [...previousBonds, optimistic];
+    setBonds(next);
     setInputCusip("");
+    setInputPrice("");
+    setInputQty("");
     try {
-      const updated = await syncToBackend([...previousBonds.map((b) => b.cusip), cusip]);
+      const updated = await syncToBackend(next);
       setBonds(updated);
     } catch (e) {
       setBonds(previousBonds);
@@ -82,7 +105,7 @@ export default function BondList({ initialBonds, isDefensive }: BondListProps) {
     const remaining = previousBonds.filter((b) => b.cusip !== cusip);
     setBonds(remaining);
     try {
-      const updated = await syncToBackend(remaining.map((b) => b.cusip));
+      const updated = await syncToBackend(remaining);
       setBonds(updated);
     } catch (e) {
       setBonds(previousBonds);
@@ -113,11 +136,12 @@ export default function BondList({ initialBonds, isDefensive }: BondListProps) {
         </span>
       </div>
       <p className="text-xs text-[var(--muted)] mt-1 mb-5 leading-relaxed">
-        Enter a 9-character CUSIP. We&apos;ll fetch grade, yield-to-maturity, and spread on save.
+        Enter a 9-character CUSIP plus what you paid and how many. We&apos;ll fetch grade,
+        yield-to-maturity, and spread on save. Allocation uses purchase price × quantity, not a live mark.
       </p>
 
       <div className="flex gap-2 mb-3 flex-wrap">
-        <div className="flex-1 min-w-[200px] flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--background)] focus-within:border-[var(--accent)] focus-within:ring-2 focus-within:ring-[color-mix(in_oklch,var(--accent)_15%,transparent)] transition">
+        <div className="flex-1 min-w-[180px] flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--background)] focus-within:border-[var(--accent)] focus-within:ring-2 focus-within:ring-[color-mix(in_oklch,var(--accent)_15%,transparent)] transition">
           <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--muted)] shrink-0">
             CUSIP
           </span>
@@ -142,10 +166,44 @@ export default function BondList({ initialBonds, isDefensive }: BondListProps) {
             </span>
           )}
         </div>
+        <div className="w-[140px] flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--background)] focus-within:border-[var(--accent)] focus-within:ring-2 focus-within:ring-[color-mix(in_oklch,var(--accent)_15%,transparent)] transition">
+          <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--muted)] shrink-0">
+            Price $
+          </span>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={inputPrice}
+            onChange={(e) => setInputPrice(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="980.50"
+            disabled={loading}
+            className="flex-1 w-full bg-transparent outline-none tabular text-sm placeholder:text-[var(--muted)]"
+            aria-label="Purchase price"
+          />
+        </div>
+        <div className="w-[120px] flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--background)] focus-within:border-[var(--accent)] focus-within:ring-2 focus-within:ring-[color-mix(in_oklch,var(--accent)_15%,transparent)] transition">
+          <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--muted)] shrink-0">
+            Qty
+          </span>
+          <input
+            type="number"
+            min="1"
+            step="1"
+            value={inputQty}
+            onChange={(e) => setInputQty(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="10"
+            disabled={loading}
+            className="flex-1 w-full bg-transparent outline-none tabular text-sm placeholder:text-[var(--muted)]"
+            aria-label="Quantity"
+          />
+        </div>
         <button
           type="button"
           onClick={() => void handleAdd()}
-          disabled={loading || inputCusip.trim().length === 0}
+          disabled={loading || !inputsValid}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-800 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed transition"
         >
           {loading ? (
@@ -195,6 +253,8 @@ export default function BondList({ initialBonds, isDefensive }: BondListProps) {
                 <th className="text-left px-4 py-2.5">CUSIP</th>
                 <th className="text-left px-3 py-2.5">Grade</th>
                 <th className="text-left px-3 py-2.5">Type</th>
+                <th className="text-right px-3 py-2.5">Price</th>
+                <th className="text-right px-3 py-2.5">Qty</th>
                 <th className="text-right px-3 py-2.5">YTM</th>
                 <th className="text-right px-3 py-2.5">Spread</th>
                 <th className="px-3 py-2.5"></th>
@@ -215,6 +275,14 @@ export default function BondList({ initialBonds, isDefensive }: BondListProps) {
                       </span>
                     </td>
                     <td className="px-3 py-3 text-[var(--muted)] text-xs">{b.bond_type ?? "—"}</td>
+                    <td className="px-3 py-3 text-right tabular">
+                      {b.purchase_price !== null && b.purchase_price !== undefined
+                        ? `$${b.purchase_price.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+                        : "—"}
+                    </td>
+                    <td className="px-3 py-3 text-right tabular">
+                      {b.quantity !== null && b.quantity !== undefined ? b.quantity.toLocaleString() : "—"}
+                    </td>
                     <td className="px-3 py-3 text-right tabular">
                       {b.ytm !== null && b.ytm !== undefined ? `${b.ytm.toFixed(2)}%` : "—"}
                     </td>
