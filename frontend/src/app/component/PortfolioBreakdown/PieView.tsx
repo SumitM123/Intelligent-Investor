@@ -103,9 +103,15 @@ export default function PieView({ slices, unit = "usd" }: PieViewProps) {
                 onClick={s.onClick}
                 className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-lg hover:bg-black/[0.04] transition text-left"
               >
-                <span className="flex items-center gap-2 min-w-0">
-                  <span className="w-3 h-3 rounded-sm shrink-0" style={{ background: s.color }} />
-                  <span className="truncate text-sm">{s.label}</span>
+                <span className="flex items-start gap-2 min-w-0">
+                  <span
+                    className="w-3 h-3 rounded-sm shrink-0 mt-1"
+                    style={{ background: s.color }}
+                  />
+                  {/* Wrap rather than truncate: several real labels overflow the
+                      legend column ("US Government (AA)", "Communication
+                      Services"), and a cut-off label is worse than two lines. */}
+                  <span className="text-sm break-words">{s.label}</span>
                 </span>
                 <span className="tabular text-sm text-[var(--muted)] shrink-0">
                   {formatValue(s.value, unit)}

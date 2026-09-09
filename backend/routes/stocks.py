@@ -69,10 +69,11 @@ def _fetch_etf_sector_weights(symbol: str) -> list[dict]:
     return out
 
 
-# yfinance bond_ratings buckets, in credit order. `us_government` is deliberately
-# excluded: it is an overlapping issuer statistic rather than a rating bucket.
-# These eight sum to 1.0 on their own (verified against BND/AGG/TLT/HYG), so
-# including it would inflate the pie — TLT alone would total ~199%.
+# yfinance bond_ratings buckets, in credit order. `us_government` is NOT one of
+# them: it is a sector figure that overlaps the rating buckets (it is what
+# Robinhood shows as "government bonds"). These eight sum to 1.0 on their own
+# (verified against BND/AGG/TLT/HYG), so charting it as a ninth peer would
+# inflate the pie — TLT alone would total ~199%.
 _BOND_RATING_LABELS = [
     ("aaa", "AAA"),
     ("aa", "AA"),
@@ -84,6 +85,15 @@ _BOND_RATING_LABELS = [
     ("other", "Other"),
 ]
 
+GOVERNMENT_GRADE = "US Government (AA)"
+
+
+def _pct(raw) -> float:
+    try:
+        return float(raw or 0) * 100
+    except (TypeError, ValueError):
+        return 0.0
+
 
 def _fetch_bond_etf_ratings(symbol: str) -> list[dict]:
     """Return [{grade, weight_pct}] describing a bond fund's credit quality.
@@ -92,6 +102,9 @@ def _fetch_bond_etf_ratings(symbol: str) -> list[dict]:
     top_holdings for them. Credit quality is the meaningful composition to chart
     instead, and it lands on the same grade vocabulary the manually entered
     bonds already use. Returns [] on any failure, matching _fetch_etf_sector_weights.
+
+    Government holdings are carved out of the AA bucket rather than added
+    alongside it, so the slices still total 100%.
     """
     try:
         ratings = yf.Ticker(symbol).funds_data.bond_ratings
@@ -100,17 +113,32 @@ def _fetch_bond_etf_ratings(symbol: str) -> list[dict]:
         return []
     if not isinstance(ratings, dict):
         return []
+
+    # S&P cut the US to AA+ in 2011, so a US fund's Treasuries sit inside the aa
+    # bucket and can be split out of it without changing the total (BND: 72.74%
+    # aa = 51.83% government + 20.91% other AA). That containment is only true
+    # when the government exposure is US Treasuries; funds holding foreign
+    # sovereigns report government well in excess of aa (BNDX: 76.95% vs 17.05%,
+    # FBND: 40.17% vs 3.55%) because those bonds are rated across the spectrum.
+    # Splitting those would invent a slice and push the pie past 100%, so only
+    # split where the data proves containment.
+    gov = _pct(ratings.get("us_government"))
+    split_government = 0 < gov <= _pct(ratings.get("aa"))
+
     out: list[dict] = []
     for key, label in _BOND_RATING_LABELS:
-        try:
-            weight = float(ratings.get(key) or 0)
-        except (TypeError, ValueError):
+        weight = _pct(ratings.get(key))
+        if key == "aa" and split_government:
+            out.append({"grade": GOVERNMENT_GRADE, "weight_pct": round(gov, 2)})
+            weight -= gov
+        # Drop empty buckets and slivers that would render as an invisible wedge
+        # with a "0.0%" legend row (BND's unrated residual is 0.03%). This also
+        # drops negative buckets, which actively managed funds report for short
+        # or derivative offsets (FBND: other = -2.86%) and a pie cannot draw —
+        # such a fund's slices then total slightly over 100%.
+        if weight < 0.05:
             continue
-        # Drop empty buckets, and slivers that would render as an invisible
-        # wedge with a "0.0%" legend row (BND's unrated residual is 0.03%).
-        if weight * 100 < 0.05:
-            continue
-        out.append({"grade": label, "weight_pct": round(weight * 100, 2)})
+        out.append({"grade": label, "weight_pct": round(weight, 2)})
     return out
 
 

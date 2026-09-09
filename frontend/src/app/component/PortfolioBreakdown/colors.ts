@@ -37,6 +37,10 @@ const PALETTE = [
 // BBB amber, Matured/Unclassified/Other gray, High Yield / Junk red).
 export function gradeColor(grade?: string): string {
   const g = (grade ?? "").toUpperCase();
+  // Government sits in the AA bucket but gets its own darker green: it would
+  // otherwise fall through every branch below to the junk-red default, since
+  // the label starts with "US".
+  if (g.startsWith("US GOVERNMENT") || g.startsWith("GOVERNMENT")) return "#047857";
   if (g.startsWith("AAA") || g.startsWith("AA")) return "#10b981";
   // "OTHER" is a bond fund's unrated residual — gray, not the junk red it
   // would otherwise fall through to.
