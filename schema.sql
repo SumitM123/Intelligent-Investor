@@ -67,19 +67,30 @@ CREATE TABLE IF NOT EXISTS leading_stock_analysis (
 -- Looked up on every /api/stocks/receiveDiversification request before calling FMP.
 -- For ETFs, sector and industry are stored as 'N/A'; sector weights are fetched
 -- live from yfinance per request (not cached, since ETF composition shifts).
+-- is_bond_etf marks funds holding more fixed income than equity (yfinance
+-- asset_classes): they count toward the bonds side of the 50/50 rule, not stocks.
 CREATE TABLE IF NOT EXISTS stock_industry (
     stock_symbol TEXT PRIMARY KEY,
     sector       TEXT,
     industry     TEXT,
-    is_etf       BOOLEAN NOT NULL DEFAULT false
+    is_etf       BOOLEAN NOT NULL DEFAULT false,
+    is_bond_etf  BOOLEAN NOT NULL DEFAULT false
 );
 
--- Backfill the column for installations that pre-date it.
+-- Backfill the columns for installations that pre-date them.
 ALTER TABLE stock_industry
     ADD COLUMN IF NOT EXISTS is_etf BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE stock_industry
+    ADD COLUMN IF NOT EXISTS is_bond_etf BOOLEAN NOT NULL DEFAULT false;
 
 -- Per-user bond holdings, partitioned by investor type (defensive vs enterprising).
 -- Composite PK matches ON CONFLICT (user_id, is_defensive) in bonds.py upsert.
+-- `bonds` is a JSONB array; each element is one bond with the shape:
+--   {cusip, grade, is_high_grade, ytm, spread_bps, bond_type,
+--    treasury_yield, maturity_date,        -- from classify_bond (bond_classifier.py)
+--    purchase_price, quantity}             -- user-entered in BondList; value = price*qty
+-- treasury_yield is the interpolated curve point at maturity (percent) or null;
+-- maturity_date is an ISO date string or null. No DDL needed for new fields (JSONB).
 CREATE TABLE IF NOT EXISTS bonds_table (
     user_id      UUID NOT NULL REFERENCES users_id(user_id) ON DELETE CASCADE,
     is_defensive BOOLEAN NOT NULL,

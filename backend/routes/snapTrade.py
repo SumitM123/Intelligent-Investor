@@ -235,6 +235,152 @@ def getAllAccountsFromConnection(
     Based on the snaptrade API, make a request to the .get_user_account_positions() method. 
 '''
 @router.get("/get_user_account_positions")
+def get_user_account_positions(
+    snapTrade_id: Annotated[str, Cookie(alias="snapTradeUserID")],
+    account_id: str,
+):
+    """Return normalised positions for a single SnapTrade account.
+
+    `account_id` is required — the portfolio breakdown charts one account at a
+    time. Cash rows (no underlying symbol) are skipped.
+    """
+    return {"positions": fetch_positions_for_account(snapTrade_id, account_id)}
+
+
+def _shape(value) -> str:
+    """Describe a payload's structure (keys/lengths only, never values).
+
+    Used by the positions sanity log so SDK shape drift is diagnosable from the
+    logs without printing anyone's actual holdings.
+    """
+    if isinstance(value, dict):
+        return f"dict{sorted(value.keys())}"
+    if isinstance(value, list):
+        first = value[0] if value else None
+        inner = sorted(first.keys()) if isinstance(first, dict) else type(first).__name__
+        return f"list[{len(value)}] first={inner}"
+    return type(value).__name__
+
+
+def _extract_position_symbol(position: dict) -> str | None:
+    """Pull the ticker out of a SnapTrade position, tolerating shape drift.
+
+    SDK 13.x carries it as position.instrument.symbol; older payloads nested it
+    as position.symbol.symbol(.symbol) or only carried raw_symbol. Try each.
+    """
+    for key in ("instrument", "symbol"):
+        field = position.get(key)
+        if not isinstance(field, dict):
+            continue
+        # Ticker sitting directly on this level (SDK 13.x, or a flattened symbol).
+        for candidate in (field.get("symbol"), field.get("raw_symbol")):
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip().upper()
+        # Older nesting: .symbol is itself an object holding the ticker.
+        inner = field.get("symbol")
+        if isinstance(inner, dict):
+            ticker = inner.get("symbol") or inner.get("raw_symbol")
+            if isinstance(ticker, str) and ticker.strip():
+                return ticker.strip().upper()
+    return None
+
+
+def fetch_positions_for_account(snapTrade_id: str, account_id: str) -> list[dict]:
+    """Return [{symbol, units, market_value}] for one SnapTrade account.
+
+    Empty list (never an error) when the account has no chartable positions.
+    Cash rows and rows missing units/price are skipped.
+    """
+    if not account_id:
+        return []
+    snaptrade_usersecret_id = getSnapTradeSecretID(snapTrade_id)
+    # get_user_account_positions was removed from the SDK; positions/all is the
+    # replacement (SDK 13.x), and it wraps the position list in "results".
+    response = snapTrade.account_information.get_all_account_positions(
+        user_id=snapTrade_id,
+        user_secret=snaptrade_usersecret_id,
+        account_id=account_id,
+    )
+    body = getattr(response, "body", response)
+    # SDK 13.x wraps the payload as {"results": ..., "data_freshness": ...}.
+    payload = body.get("results", body) if isinstance(body, dict) else body
+    if isinstance(payload, dict):
+        positions = (
+            payload.get("equity_positions")
+            or payload.get("positions")
+            or payload.get("data")
+            or []
+        )
+    elif isinstance(payload, list):
+        positions = payload
+    else:
+        positions = []
+
+    # Shape-only sanity log (keys/lengths, never values) to verify nesting
+    # against a real payload without leaking holdings into the logs.
+    print(
+        f"[SNAPTRADE positions] account={account_id} count={len(positions)} "
+        f"payload={_shape(payload)}",
+        flush=True,
+    )
+
+    out: list[dict] = []
+    for position in positions:
+        if not isinstance(position, dict):
+            continue
+        symbol = _extract_position_symbol(position)
+        if not symbol:  # cash / unparseable row
+            continue
+        units = position.get("units")
+        price = position.get("price")
+        if units is None or price is None:
+            continue
+        try:
+            units_f = float(units)
+            price_f = float(price)
+        except (TypeError, ValueError):
+            continue
+        out.append({
+            "symbol": symbol,
+            "units": units_f,
+            "market_value": units_f * price_f,
+        })
+    return out
+
+
+@router.get("/list_accounts")
+def list_accounts(
+    snapTrade_id: Annotated[str, Cookie(alias="snapTradeUserID")],
+):
+    """List the user's USD SnapTrade accounts for the breakdown account picker.
+
+    Unlike getAllAccountsFromConnection this needs no connection_id — it returns
+    every USD account across all of the user's brokerage connections. Empty list
+    (not an error) when there are no USD accounts.
+    """
+    snaptrade_usersecret_id = getSnapTradeSecretID(snapTrade_id)
+    response = snapTrade.account_information.list_user_accounts(
+        user_id=snapTrade_id,
+        user_secret=snaptrade_usersecret_id,
+    )
+    accounts = getattr(response, "body", response) or []
+    if not isinstance(accounts, list):
+        accounts = []
+
+    out: list[dict] = []
+    for account in accounts:
+        if not isinstance(account, dict):
+            continue
+        balance = account.get("balance") or {}
+        total = balance.get("total") or {}
+        if total.get("currency") != "USD":
+            continue
+        out.append({
+            "id": account.get("id"),
+            "name": account.get("name") or "Brokerage account",
+            "brokerage_name": account.get("brokerage_authorization"),
+        })
+    return {"accounts": out}
 
 
 @router.get("/accountInformation")
@@ -250,7 +396,6 @@ def getAccountInformation(
         account_id=account_id
     )
 
-    snapTrade.account_information.get_user_account_positions()
     return {"account_information": account_information.body}
 
 

@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { gradeTone } from "./gradeTone";
+import { usePortfolioBonds } from "@/app/component/PortfolioBreakdown/PortfolioProvider";
 
 export interface BondEntry {
   cusip: string;
@@ -9,6 +11,7 @@ export interface BondEntry {
   ytm?: number | null;
   spread_bps?: number | null;
   bond_type?: string;
+  treasury_yield?: number | null;
   // Annual coupon rate as a PERCENT (e.g. 5.25 = 5.25%). User-provided; the backend
   // converts it to a decimal to build the annual coupon for the YTM calculation.
   coupon_rate?: number | null;
@@ -25,7 +28,6 @@ export interface BondEntry {
 }
 
 interface BondListProps {
-  initialBonds: BondEntry[];
   isDefensive: boolean;
 }
 
@@ -51,15 +53,6 @@ function lotKey(b: BondEntry): string {
   return `${b.cusip}|${b.coupon_rate}|${b.maturity_date}|${b.price}|${b.purchase_date}`;
 }
 
-function gradeTone(grade?: string): { bg: string; text: string; label: string } {
-  if (!grade) return { bg: "var(--surface-muted)", text: "var(--muted)", label: "—" };
-  const g = grade.toUpperCase();
-  if (g.startsWith("AAA") || g.startsWith("AA")) return { bg: "var(--pass-soft)", text: "var(--pass)", label: g };
-  if (g.startsWith("A")) return { bg: "var(--accent-soft)", text: "var(--accent-strong)", label: g };
-  if (g.startsWith("BBB")) return { bg: "var(--warn-soft)", text: "var(--warn)", label: g };
-  return { bg: "var(--fail-soft)", text: "var(--fail)", label: g };
-}
-
 // Shared visual shell for a labelled add-form field, so the inputs stay consistent.
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
@@ -75,8 +68,8 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
-export default function BondList({ initialBonds, isDefensive }: BondListProps) {
-  const [bonds, setBonds] = useState<BondEntry[]>(initialBonds ?? []);
+export default function BondList({ isDefensive }: BondListProps) {
+  const { bonds, setBonds } = usePortfolioBonds();
   const [draft, setDraft] = useState(EMPTY_DRAFT);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

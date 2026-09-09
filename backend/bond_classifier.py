@@ -555,8 +555,10 @@ def classify_bond(
     used because the Finnhub coupon/maturity lookup is premium-gated (disabled).
 
     Returns a dict with keys: cusip, grade, is_high_grade, ytm, spread_bps,
-    bond_type. Grade is one of "AAA" | "AA" | "A" | "BBB" | "High Yield / Junk"
-    | "Unclassified" | "Matured".
+    bond_type, treasury_yield, maturity_date. Grade is one of "AAA" | "AA" | "A"
+    | "BBB" | "High Yield / Junk" | "Unclassified" | "Matured". `treasury_yield`
+    is the interpolated curve point at the bond's maturity (percent) or None;
+    `maturity_date` is an ISO date string or None.
 
     Treasuries short-circuit with grade="AAA". Bonds with no Finnhub profile
     return grade="Unclassified" with null metrics.
@@ -568,6 +570,8 @@ def classify_bond(
         "ytm": None,
         "spread_bps": None,
         "bond_type": "unknown",
+        "treasury_yield": None,
+        "maturity_date": None,
     }
 
     print(f"[BOND] classify_bond start cusip={cusip} price_per_100={price_per_100}", flush=True)
@@ -586,6 +590,10 @@ def classify_bond(
             "ytm": None,
             "spread_bps": 0,
             "bond_type": "treasury",
+            # TreasuryDirect short-circuit: we never fetch a coupon/maturity profile
+            # or interpolate a curve point for confirmed Treasuries.
+            "treasury_yield": None,
+            "maturity_date": None,
         }
 
     # Tier 2: build the bond profile. Prefer the user-supplied coupon + maturity (the
@@ -642,6 +650,10 @@ def classify_bond(
             "ytm": None,
             "spread_bps": None,
             "bond_type": profile["bond_type"],
+            # Maturity is known from the profile; the treasury curve is only
+            # interpolated for still-outstanding bonds below.
+            "treasury_yield": None,
+            "maturity_date": maturity_date.isoformat() if maturity_date else None,
         }
 
     # Annual coupon = coupon_rate (decimal) × face. Frequency does not change the
@@ -686,6 +698,8 @@ def classify_bond(
             "ytm": round(ytm * 100, 4),
             "spread_bps": round(spread_bps, 2),
             "bond_type": profile["bond_type"],
+            "treasury_yield": round(treasury_yield * 100, 4) if treasury_yield is not None else None,
+            "maturity_date": maturity_date.isoformat() if maturity_date else None,
         }
 
     grade, is_high_grade = classify_grade(spread_bps, oas_buckets)
@@ -700,4 +714,6 @@ def classify_bond(
         "ytm": round(ytm * 100, 4),
         "spread_bps": round(spread_bps, 2),
         "bond_type": profile["bond_type"],
+        "treasury_yield": round(treasury_yield * 100, 4) if treasury_yield is not None else None,
+        "maturity_date": maturity_date.isoformat() if maturity_date else None,
     }

@@ -24,6 +24,227 @@ def _fetch_etf_weights(symbol: str) -> dict | None:
     return weights
 
 
+# yfinance emits sector keys as lowercase snake_case; FMP (used for individual
+# equities) emits Title Case. Mapping onto FMP's vocabulary lets the ETF sector
+# pie and the equities-by-sector pie share one set of names — and therefore one
+# set of colors — across drill levels.
+_YF_SECTOR_LABELS = {
+    "technology": "Technology",
+    "financial_services": "Financial Services",
+    "communication_services": "Communication Services",
+    "consumer_cyclical": "Consumer Cyclical",
+    "consumer_defensive": "Consumer Defensive",
+    "healthcare": "Healthcare",
+    "industrials": "Industrials",
+    "energy": "Energy",
+    "utilities": "Utilities",
+    "realestate": "Real Estate",
+    "basic_materials": "Basic Materials",
+}
+
+
+def _fetch_etf_sector_weights(symbol: str) -> list[dict]:
+    """Return [{sector, weight_pct}] for an equity ETF, largest slice first.
+
+    This is the fund's actual diversification. It replaces the top-10 holdings
+    view, which covered only ~38% of a fund like VOO and said nothing about the
+    remaining ~490 positions. yfinance reports fractions, so scale to percent.
+    """
+    weights = _fetch_etf_weights(symbol)
+    if not isinstance(weights, dict):
+        return []
+    out: list[dict] = []
+    for key, raw in weights.items():
+        try:
+            pct = float(raw or 0) * 100
+        except (TypeError, ValueError):
+            continue
+        if pct < 0.05:  # skip slivers that would render a "0.0%" legend row
+            continue
+        out.append({
+            "sector": _YF_SECTOR_LABELS.get(key) or key.replace("_", " ").title(),
+            "weight_pct": round(pct, 2),
+        })
+    out.sort(key=lambda row: row["weight_pct"], reverse=True)
+    return out
+
+
+# yfinance bond_ratings buckets, in credit order. `us_government` is NOT one of
+# them: it is a sector figure that overlaps the rating buckets (it is what
+# Robinhood shows as "government bonds"). These eight sum to 1.0 on their own
+# (verified against BND/AGG/TLT/HYG), so charting it as a ninth peer would
+# inflate the pie — TLT alone would total ~199%.
+_BOND_RATING_LABELS = [
+    ("aaa", "AAA"),
+    ("aa", "AA"),
+    ("a", "A"),
+    ("bbb", "BBB"),
+    ("bb", "BB"),
+    ("b", "B"),
+    ("below_b", "Below B"),
+    ("other", "Other"),
+]
+
+GOVERNMENT_GRADE = "US Government (AA)"
+
+
+def _pct(raw) -> float:
+    try:
+        return float(raw or 0) * 100
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _fetch_bond_etf_ratings(symbol: str) -> list[dict]:
+    """Return [{grade, weight_pct}] describing a bond fund's credit quality.
+
+    Bond funds hold thousands of individual issues, so yfinance exposes no
+    top_holdings for them. Credit quality is the meaningful composition to chart
+    instead, and it lands on the same grade vocabulary the manually entered
+    bonds already use. Returns [] on any failure, matching _fetch_etf_sector_weights.
+
+    Government holdings are carved out of the AA bucket rather than added
+    alongside it, so the slices still total 100%.
+    """
+    try:
+        ratings = yf.Ticker(symbol).funds_data.bond_ratings
+    except Exception as exc:
+        print(f"[YF ERR] bond_ratings symbol={symbol} exc={exc}", flush=True)
+        return []
+    if not isinstance(ratings, dict):
+        return []
+
+    # S&P cut the US to AA+ in 2011, so a US fund's Treasuries sit inside the aa
+    # bucket and can be split out of it without changing the total (BND: 72.74%
+    # aa = 51.83% government + 20.91% other AA). That containment is only true
+    # when the government exposure is US Treasuries; funds holding foreign
+    # sovereigns report government well in excess of aa (BNDX: 76.95% vs 17.05%,
+    # FBND: 40.17% vs 3.55%) because those bonds are rated across the spectrum.
+    # Splitting those would invent a slice and push the pie past 100%, so only
+    # split where the data proves containment.
+    gov = _pct(ratings.get("us_government"))
+    split_government = 0 < gov <= _pct(ratings.get("aa"))
+
+    out: list[dict] = []
+    for key, label in _BOND_RATING_LABELS:
+        weight = _pct(ratings.get(key))
+        if key == "aa" and split_government:
+            out.append({"grade": GOVERNMENT_GRADE, "weight_pct": round(gov, 2)})
+            weight -= gov
+        # Drop empty buckets and slivers that would render as an invisible wedge
+        # with a "0.0%" legend row (BND's unrated residual is 0.03%). This also
+        # drops negative buckets, which actively managed funds report for short
+        # or derivative offsets (FBND: other = -2.86%) and a pie cannot draw —
+        # such a fund's slices then total slightly over 100%.
+        if weight < 0.05:
+            continue
+        out.append({"grade": label, "weight_pct": round(weight, 2)})
+    return out
+
+
+def _is_bond_etf(symbol: str) -> bool:
+    """True when an ETF holds more fixed income than equity.
+
+    A bond ETF (BND, AGG, …) is a fixed-income holding, so it belongs on the
+    bonds side of Graham's 50/50 rule. Counting one as stock skews every
+    allocation signal the app produces, so this is deliberately checked rather
+    than inferred from the ticker. Falls back to False (equity ETF) whenever
+    yfinance can't answer — the pre-existing behaviour.
+    """
+    try:
+        classes = yf.Ticker(symbol).funds_data.asset_classes
+    except Exception as exc:
+        print(f"[YF ERR] asset_classes symbol={symbol} exc={exc}", flush=True)
+        return False
+    if not isinstance(classes, dict):
+        return False
+    try:
+        return float(classes.get("bondPosition") or 0) > float(classes.get("stockPosition") or 0)
+    except (TypeError, ValueError):
+        return False
+
+
+def resolve_symbols(symbols: list[str]) -> dict[str, tuple]:
+    """Resolve (sector, industry, is_etf, is_bond_etf) for each symbol.
+
+    Reads the `stock_industry` cache first, falls back to FMP /profile for cache
+    misses, and persists the misses. Returns
+    {symbol: (sector, industry, is_etf, is_bond_etf)}; symbols FMP can't resolve
+    are simply omitted. ETFs store sector/industry as "N/A" — their composition
+    is fetched live elsewhere.
+    """
+    if not symbols:
+        return {}
+
+    with SessionLocal() as session:
+        cached_rows = session.execute(
+            text(
+                """
+                SELECT stock_symbol, sector, industry, is_etf, is_bond_etf
+                FROM stock_industry
+                WHERE stock_symbol = ANY(:symbols)
+                """
+            ),
+            {"symbols": symbols},
+        ).all()
+
+    cache: dict[str, tuple] = {row[0]: (row[1], row[2], row[3], row[4]) for row in cached_rows}
+    missing = [s for s in symbols if s not in cache]
+    if not missing:
+        return cache
+
+    # FMP /stable/profile accepts a single symbol per call (the v3 path-batch
+    # form was deprecated Aug 2025). We loop here; the cache absorbs repeat work.
+    to_insert = []
+    for sym in missing:
+        profiles = fetch_fmp("profile", symbol=sym)
+        if not isinstance(profiles, list) or not profiles:
+            continue
+        entry = profiles[0]
+        if not isinstance(entry, dict):
+            continue
+        is_etf = bool(entry.get("isEtf"))
+        if is_etf:
+            # ETF composition shifts too often to cache locally; callers fetch
+            # fresh weights / holdings from yfinance per request. Which side of
+            # the 50/50 rule the fund sits on, though, is stable enough to cache.
+            sector, industry = "N/A", "N/A"
+            is_bond_etf = _is_bond_etf(sym)
+        else:
+            sector = entry.get("sector") or None
+            industry = entry.get("industry") or None
+            is_bond_etf = False
+        to_insert.append({
+            "stock_symbol": sym,
+            "sector": sector,
+            "industry": industry,
+            "is_etf": is_etf,
+            "is_bond_etf": is_bond_etf,
+        })
+        cache[sym] = (sector, industry, is_etf, is_bond_etf)
+
+    if to_insert:
+        with SessionLocal() as session:
+            try:
+                for row in to_insert:
+                    session.execute(
+                        text(
+                            """
+                            INSERT INTO stock_industry (stock_symbol, sector, industry, is_etf, is_bond_etf)
+                            VALUES (:stock_symbol, :sector, :industry, :is_etf, :is_bond_etf)
+                            ON CONFLICT (stock_symbol) DO NOTHING
+                            """
+                        ),
+                        row,
+                    )
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
+
+    return cache
+
+
 # NOTE for frontend callers: `symbols` is forwarded to FMP's /profile/{symbols}
 # endpoint as a comma-separated list. FMP does not publish an explicit cap, but
 # URL length, plan-tier batch limits, and the 20s HTTP timeout make a single
@@ -72,85 +293,13 @@ def receiveDiversification(
             detail="symbols must contain at least one ticker",
         )
 
-    with SessionLocal() as session:
-        # get's all the rows in one query for each symbol
-        cached_rows = session.execute(
-            text(
-                """
-                SELECT stock_symbol, sector, industry, is_etf
-                FROM stock_industry
-                WHERE stock_symbol = ANY(:symbols)
-                """
-            ),
-            {"symbols": requested},
-        ).all()
-
-    # cache[sym] = (sector, industry, is_etf); creating a cache for the already found rows
-    cache: dict[str, tuple] = {row[0]: (row[1], row[2], row[3]) for row in cached_rows}
-    missing = [s for s in requested if s not in cache]
-    # fetching the contents for the symbols that weren't inside of the cache
-    if missing:
-        # FMP /stable/profile accepts a single symbol per call (the v3 path-batch
-        # form was deprecated Aug 2025). We loop here; cache absorbs repeat work.
-        fetched: dict[str, tuple] = {}
-        to_insert = []
-        for sym in missing:
-            profiles = fetch_fmp("profile", symbol=sym)
-            if not isinstance(profiles, list) or not profiles:
-                continue
-            entry = profiles[0]
-            if not isinstance(entry, dict):
-                continue
-            is_etf = bool(entry.get("isEtf"))
-            if is_etf:
-                # ETF composition shifts too often to cache locally; the route
-                # always fetches fresh weights from yfinance below.
-                sector, industry = "N/A", "N/A"
-            else:
-                sector = entry.get("sector") or None
-                industry = entry.get("industry") or None
-                fetched[sym] = (sector, industry, False)
-            to_insert.append({
-                "stock_symbol": sym,
-                "sector": sector,
-                "industry": industry,
-                "is_etf": is_etf,
-            })
-            cache[sym] = (sector, industry, is_etf)
-        # create a mapping that needs to be inserted after retriving the respective values
-        # to_insert = []
-        # for sym in missing:
-        #     sector, industry, is_etf = fetched.get(sym, (None, None, False))
-        #     cache[sym] = (sector, industry, is_etf)
-        #     to_insert.append({
-        #         "stock_symbol": sym,
-        #         "sector": sector,
-        #         "industry": industry,
-        #         "is_etf": is_etf,
-        #     })
-
-        with SessionLocal() as session:
-            try:
-                for row in to_insert:
-                    session.execute(
-                        text(
-                            """
-                            INSERT INTO stock_industry (stock_symbol, sector, industry, is_etf)
-                            VALUES (:stock_symbol, :sector, :industry, :is_etf)
-                            ON CONFLICT (stock_symbol) DO NOTHING
-                            """
-                        ),
-                        row,
-                    )
-                session.commit()
-            except Exception:
-                session.rollback()
-                raise
+    # Resolve sector/industry/is_etf via the shared cache-then-FMP helper.
+    cache = resolve_symbols(requested)
 
     diversification = []
     etfs: list[dict] = []
     for sym in requested:
-        sector, industry, is_etf = cache.get(sym, (None, None, False))
+        sector, industry, is_etf, _is_bond = cache.get(sym, (None, None, False, False))
         if is_etf:
             weights = _fetch_etf_weights(sym)
             etfs.append({sym: weights if weights is not None else {}})

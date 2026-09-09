@@ -1,0 +1,274 @@
+// Pure slice-derivation: given the current drill frame + the unified breakdown,
+// produce the pie slices (and their drill-in handlers). Keeping this pure lets
+// PieView stay presentational and makes the levels trivially testable.
+
+import type { BondEntry } from "@/app/component/BondList/BondList";
+import { STOCKS_COLOR, BONDS_COLOR, ETF_COLOR, BOND_ETF_COLOR, pickColors, gradeColor } from "./colors";
+import type { Breakdown, BondNode, Frame, Slice } from "./types";
+
+// Build the bonds half of the breakdown from the shared BondList state so it
+// stays reactive to add/delete edits (value = price × quantity). A CUSIP can
+// appear as more than one distinct lot, so each entry is kept separate and
+// identified by its lot key rather than by CUSIP alone.
+export function bondsToByGrade(
+  bonds: BondEntry[],
+): { byGrade: Record<string, BondNode[]>; total: number } {
+  const byGrade: Record<string, BondNode[]> = {};
+  let total = 0;
+  for (const b of bonds) {
+    const price = b.price ?? 0;
+    const qty = b.quantity ?? 0;
+    const value = price * qty;
+    total += value;
+    const grade = b.grade || "Unclassified";
+    (byGrade[grade] ??= []).push({
+      lot_key: `${b.cusip}|${b.coupon_rate}|${b.maturity_date}|${b.price}|${b.purchase_date}`,
+      cusip: b.cusip,
+      grade,
+      bond_value: value,
+      coupon_rate: b.coupon_rate ?? null,
+      price: b.price ?? null,
+      quantity: b.quantity ?? null,
+      purchase_date: b.purchase_date ?? null,
+      ytm: b.ytm ?? null,
+      spread_bps: b.spread_bps ?? null,
+      treasury_yield: b.treasury_yield ?? null,
+      maturity_date: b.maturity_date ?? null,
+      bond_type: b.bond_type ?? null,
+    });
+  }
+  return { byGrade, total };
+}
+
+export function findBond(bd: Breakdown, lotKey: string): BondNode | null {
+  for (const list of Object.values(bd.bonds_by_grade)) {
+    const hit = list.find((b) => b.lot_key === lotKey);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+// Short label for one frame, used to render the breadcrumb path.
+export function frameLabel(frame: Frame): string {
+  switch (frame.level) {
+    case "L0":
+      return "Portfolio";
+    case "L1S":
+      return "Stocks";
+    case "L1B":
+      return "Bonds";
+    case "L2E":
+      return "Equities";
+    case "L2T":
+      return "ETFs";
+    case "L2BE":
+      return "Bond ETFs";
+    case "L2B":
+      return frame.grade;
+    case "L3E":
+      return frame.sector;
+    case "L3T":
+    case "L3BE":
+      return frame.etfSymbol;
+    case "L3B":
+      return frame.cusip;
+  }
+}
+
+export function titleFor(frame: Frame): string {
+  switch (frame.level) {
+    case "L0":
+      return "Stocks vs Bonds";
+    case "L1S":
+      return "Equities vs ETFs";
+    case "L1B":
+      return "Bonds by grade";
+    case "L2E":
+      return "Equities by sector";
+    case "L2T":
+      return "ETFs by position";
+    case "L2BE":
+      return "Bond ETFs by position";
+    case "L2B":
+      return `${frame.grade} bonds`;
+    case "L3E":
+      return `${frame.sector} stocks`;
+    case "L3T":
+      return `${frame.etfSymbol} by sector`;
+    case "L3BE":
+      return `${frame.etfSymbol} credit quality`;
+    case "L3B":
+      return `Bond ${frame.cusip}`;
+  }
+}
+
+// Whether the current level's values are dollars or percentages (the ETF leaves
+// — holdings weights and credit-quality weights — are the percentage ones).
+export function unitFor(frame: Frame): "usd" | "pct" {
+  return frame.level === "L3T" || frame.level === "L3BE" ? "pct" : "usd";
+}
+
+export function slicesFor(frame: Frame, bd: Breakdown, push: (f: Frame) => void): Slice[] {
+  switch (frame.level) {
+    case "L0": {
+      const slices: Slice[] = [];
+      if (bd.stocks_total > 0) {
+        slices.push({
+          label: "Stocks",
+          value: bd.stocks_total,
+          color: STOCKS_COLOR,
+          onClick: () => push({ level: "L1S" }),
+        });
+      }
+      if (bd.bonds_total > 0) {
+        slices.push({
+          label: "Bonds",
+          value: bd.bonds_total,
+          color: BONDS_COLOR,
+          onClick: () => push({ level: "L1B" }),
+        });
+      }
+      return slices;
+    }
+
+    case "L1S": {
+      const equityTotal = bd.equities.reduce((a, e) => a + e.market_value, 0);
+      const etfTotal = bd.etfs.reduce((a, e) => a + e.market_value, 0);
+      const slices: Slice[] = [];
+      if (equityTotal > 0) {
+        slices.push({
+          label: "Equities",
+          value: equityTotal,
+          color: STOCKS_COLOR,
+          onClick: () => push({ level: "L2E" }),
+        });
+      }
+      if (etfTotal > 0) {
+        slices.push({
+          label: "ETFs",
+          value: etfTotal,
+          color: ETF_COLOR,
+          onClick: () => push({ level: "L2T" }),
+        });
+      }
+      return slices;
+    }
+
+    case "L2E": {
+      const bySector = new Map<string, number>();
+      for (const e of bd.equities) {
+        bySector.set(e.sector, (bySector.get(e.sector) ?? 0) + e.market_value);
+      }
+      const entries = [...bySector.entries()];
+      const colors = pickColors(entries.map(([sector]) => sector));
+      return entries.map(([sector, value], i) => ({
+        label: sector,
+        value,
+        color: colors[i],
+        onClick: () => push({ level: "L3E", sector }),
+      }));
+    }
+
+    case "L3E": {
+      // Leaf: individual stocks within the chosen sector. No further drill.
+      const inSector = bd.equities.filter((e) => e.sector === frame.sector);
+      const colors = pickColors(inSector.map((e) => e.symbol));
+      return inSector.map((e, i) => ({
+        label: e.symbol,
+        value: e.market_value,
+        color: colors[i],
+        onClick: () => {},
+      }));
+    }
+
+    case "L2T": {
+      const colors = pickColors(bd.etfs.map((e) => e.symbol));
+      return bd.etfs.map((e, i) => ({
+        label: e.symbol,
+        value: e.market_value,
+        color: colors[i],
+        onClick: () => push({ level: "L3T", etfSymbol: e.symbol }),
+      }));
+    }
+
+    case "L3T": {
+      // Leaf: the ETF's sector mix (weights, not dollars). Colored from the same
+      // palette the equities-by-sector level uses, so a sector keeps one color
+      // wherever it appears — deduped so no two wedges here look alike.
+      const etf = bd.etfs.find((e) => e.symbol === frame.etfSymbol);
+      if (!etf) return [];
+      const colors = pickColors(etf.sector_weights.map((s) => s.sector));
+      return etf.sector_weights.map((s, i) => ({
+        label: s.sector,
+        value: s.weight_pct,
+        color: colors[i],
+        onClick: () => {},
+      }));
+    }
+
+    case "L1B": {
+      const slices: Slice[] = Object.entries(bd.bonds_by_grade).map(([grade, list]) => ({
+        label: grade,
+        value: list.reduce((a, b) => a + b.bond_value, 0),
+        color: gradeColor(grade),
+        onClick: () => push({ level: "L2B", grade }),
+      }));
+      // Brokerage-held fixed income sits alongside the credit-grade groups
+      // rather than inside one — a fund has no single CUSIP or grade.
+      const bondEtfTotal = bd.bond_etfs.reduce((a, e) => a + e.market_value, 0);
+      if (bondEtfTotal > 0) {
+        slices.push({
+          label: "Bond ETFs",
+          value: bondEtfTotal,
+          color: BOND_ETF_COLOR,
+          onClick: () => push({ level: "L2BE" }),
+        });
+      }
+      return slices;
+    }
+
+    case "L2BE": {
+      const colors = pickColors(bd.bond_etfs.map((e) => e.symbol));
+      return bd.bond_etfs.map((e, i) => ({
+        label: e.symbol,
+        value: e.market_value,
+        color: colors[i],
+        onClick: () => push({ level: "L3BE", etfSymbol: e.symbol }),
+      }));
+    }
+
+    case "L3BE": {
+      // Leaf: a bond fund's credit-quality mix (weights, not dollars). Graded
+      // colors keep it visually consistent with the manual bonds' grade ring.
+      const etf = bd.bond_etfs.find((e) => e.symbol === frame.etfSymbol);
+      if (!etf) return [];
+      return etf.credit_quality.map((r) => ({
+        label: r.grade,
+        value: r.weight_pct,
+        color: gradeColor(r.grade),
+        onClick: () => {},
+      }));
+    }
+
+    case "L2B": {
+      const list = bd.bonds_by_grade[frame.grade] ?? [];
+      // Disambiguate multiple lots of the same CUSIP with their purchase date,
+      // so duplicate labels don't collide in the legend/chart.
+      const cusipCounts = new Map<string, number>();
+      for (const b of list) cusipCounts.set(b.cusip, (cusipCounts.get(b.cusip) ?? 0) + 1);
+      return list.map((b) => ({
+        label:
+          (cusipCounts.get(b.cusip) ?? 0) > 1
+            ? `${b.cusip} (${b.purchase_date ?? "—"})`
+            : b.cusip,
+        value: b.bond_value,
+        color: gradeColor(b.grade),
+        onClick: () => push({ level: "L3B", cusip: b.cusip, lotKey: b.lot_key }),
+      }));
+    }
+
+    case "L3B":
+      // Leaf info card — rendered by BondDetailCard, not as a pie.
+      return [];
+  }
+}
