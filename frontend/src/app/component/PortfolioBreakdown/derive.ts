@@ -7,24 +7,29 @@ import { STOCKS_COLOR, BONDS_COLOR, ETF_COLOR, BOND_ETF_COLOR, pickColors, grade
 import type { Breakdown, BondNode, Frame, Slice } from "./types";
 
 // Build the bonds half of the breakdown from the shared BondList state so it
-// stays reactive to add/delete edits (value = purchase_price × quantity).
+// stays reactive to add/delete edits (value = price × quantity). A CUSIP can
+// appear as more than one distinct lot, so each entry is kept separate and
+// identified by its lot key rather than by CUSIP alone.
 export function bondsToByGrade(
   bonds: BondEntry[],
 ): { byGrade: Record<string, BondNode[]>; total: number } {
   const byGrade: Record<string, BondNode[]> = {};
   let total = 0;
   for (const b of bonds) {
-    const price = b.purchase_price ?? 0;
+    const price = b.price ?? 0;
     const qty = b.quantity ?? 0;
     const value = price * qty;
     total += value;
     const grade = b.grade || "Unclassified";
     (byGrade[grade] ??= []).push({
+      lot_key: `${b.cusip}|${b.coupon_rate}|${b.maturity_date}|${b.price}|${b.purchase_date}`,
       cusip: b.cusip,
       grade,
       bond_value: value,
-      purchase_price: b.purchase_price ?? null,
+      coupon_rate: b.coupon_rate ?? null,
+      price: b.price ?? null,
       quantity: b.quantity ?? null,
+      purchase_date: b.purchase_date ?? null,
       ytm: b.ytm ?? null,
       spread_bps: b.spread_bps ?? null,
       treasury_yield: b.treasury_yield ?? null,
@@ -35,9 +40,9 @@ export function bondsToByGrade(
   return { byGrade, total };
 }
 
-export function findBond(bd: Breakdown, cusip: string): BondNode | null {
+export function findBond(bd: Breakdown, lotKey: string): BondNode | null {
   for (const list of Object.values(bd.bonds_by_grade)) {
-    const hit = list.find((b) => b.cusip === cusip);
+    const hit = list.find((b) => b.lot_key === lotKey);
     if (hit) return hit;
   }
   return null;
@@ -247,11 +252,18 @@ export function slicesFor(frame: Frame, bd: Breakdown, push: (f: Frame) => void)
 
     case "L2B": {
       const list = bd.bonds_by_grade[frame.grade] ?? [];
+      // Disambiguate multiple lots of the same CUSIP with their purchase date,
+      // so duplicate labels don't collide in the legend/chart.
+      const cusipCounts = new Map<string, number>();
+      for (const b of list) cusipCounts.set(b.cusip, (cusipCounts.get(b.cusip) ?? 0) + 1);
       return list.map((b) => ({
-        label: b.cusip,
+        label:
+          (cusipCounts.get(b.cusip) ?? 0) > 1
+            ? `${b.cusip} (${b.purchase_date ?? "—"})`
+            : b.cusip,
         value: b.bond_value,
         color: gradeColor(b.grade),
-        onClick: () => push({ level: "L3B", cusip: b.cusip }),
+        onClick: () => push({ level: "L3B", cusip: b.cusip, lotKey: b.lot_key }),
       }));
     }
 

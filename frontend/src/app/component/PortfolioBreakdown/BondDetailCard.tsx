@@ -15,12 +15,18 @@ function pct(n: number | null): string {
 
 export default function BondDetailCard({ bond }: { bond: BondNode }) {
   const tone = gradeTone(bond.grade);
-  const positionValue =
-    (bond.purchase_price ?? 0) * (bond.quantity ?? 0) || null;
+  const positionValue = (bond.price ?? 0) * (bond.quantity ?? 0) || null;
 
   const rows: { label: string; value: string }[] = [
     { label: "Type", value: bond.bond_type ?? "—" },
-    { label: "Purchase price", value: money(bond.purchase_price) },
+    {
+      label: "Coupon",
+      value:
+        bond.coupon_rate !== null && bond.coupon_rate !== undefined
+          ? `${bond.coupon_rate.toFixed(2)}%`
+          : "—",
+    },
+    { label: "Price / 100", value: bond.price !== null && bond.price !== undefined ? bond.price.toFixed(2) : "—" },
     {
       label: "Quantity",
       value:
@@ -29,6 +35,7 @@ export default function BondDetailCard({ bond }: { bond: BondNode }) {
           : "—",
     },
     { label: "Position value", value: money(positionValue) },
+    { label: "Purchase date", value: bond.purchase_date ?? "—" },
     { label: "Yield to maturity", value: pct(bond.ytm) },
     { label: "Treasury yield @ maturity", value: pct(bond.treasury_yield) },
     {
