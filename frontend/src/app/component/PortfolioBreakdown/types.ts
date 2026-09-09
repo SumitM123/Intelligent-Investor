@@ -33,11 +33,17 @@ export interface BondEtfPosition {
 }
 
 export interface BondNode {
+  // Identifies one lot uniquely (cusip + coupon_rate + maturity_date + price +
+  // purchase_date) — a CUSIP alone is no longer unique now that the same bond
+  // can be held as multiple distinct lots. See BondList.tsx::lotKey.
+  lot_key: string;
   cusip: string;
   grade: string;
   bond_value: number;
-  purchase_price: number | null;
+  coupon_rate: number | null;
+  price: number | null;
   quantity: number | null;
+  purchase_date: string | null;
   ytm: number | null;
   spread_bps: number | null;
   treasury_yield: number | null;
@@ -79,7 +85,7 @@ export type Frame =
   | { level: "L3E"; sector: string }
   | { level: "L3T"; etfSymbol: string }
   | { level: "L3BE"; etfSymbol: string }
-  | { level: "L3B"; cusip: string };
+  | { level: "L3B"; cusip: string; lotKey: string };
 
 export interface Slice {
   label: string;

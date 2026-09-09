@@ -148,7 +148,7 @@ export default function PortfolioBreakdown({ isDefensive, hasSnapTradeUser }: Pr
         </span>
       </div>
       <p className="text-xs text-[var(--muted)] mt-1 mb-4 leading-relaxed">
-        Click a slice (or a legend row) to drill in. Bond allocation uses purchase price × quantity,
+        Click a slice (or a legend row) to drill in. Bond allocation uses price × quantity,
         not a live mark.
       </p>
 
@@ -245,7 +245,7 @@ export default function PortfolioBreakdown({ isDefensive, hasSnapTradeUser }: Pr
           {/* Body */}
           {current.level === "L3B" ? (
             (() => {
-              const bond = findBond(breakdown, current.cusip);
+              const bond = findBond(breakdown, current.lotKey);
               return bond ? (
                 <BondDetailCard bond={bond} />
               ) : (

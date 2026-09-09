@@ -106,7 +106,6 @@ CREATE TABLE IF NOT EXISTS bonds_table (
 CREATE TABLE IF NOT EXISTS bond_profile_cache (
     cusip         TEXT PRIMARY KEY,
     coupon_rate   FLOAT,
-    payment_freq  TEXT,
     maturity_date DATE,
     face_value    FLOAT,
     bond_type     TEXT,

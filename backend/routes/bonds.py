@@ -3,14 +3,12 @@ Bonds router.
 
 `POST /api/bonds` syncs the user's bond list for a given investor type
 (`is_defensive=true|false`). The frontend sends the current set of bonds, each
-carrying a CUSIP plus the `purchase_price` and `quantity` the user entered; the
-backend classifies any new CUSIPs via `bond_classifier.classify_bond`, reuses
-cached entries for unchanged CUSIPs (splicing in the latest price/quantity), and
-upserts the full enriched list into `bonds_table` as a JSONB array.
+with a CUSIP plus user-entered price (per 100 of par), quantity, and purchase
+date; the backend classifies any new lots via `bond_classifier.classify_bond`
+(feeding in the price + purchase date), reuses stored entries for unchanged
+lots, and upserts the full enriched list into `bonds_table` as a JSONB array.
 
-`GET /api/bonds?is_defensive=true|false` returns the persisted list. Each entry
-carries `cusip, grade, is_high_grade, ytm, spread_bps, bond_type,
-treasury_yield, maturity_date, purchase_price, quantity`.
+`GET /api/bonds?is_defensive=true|false` returns the persisted list.
 """
 
 import json
@@ -31,18 +29,21 @@ router = APIRouter(prefix="/api/bonds")
 
 class BondInput(BaseModel):
     cusip: str
-    # Optional so re-syncs of legacy rows (which predate these fields) don't 422
-    # at the schema layer; newly-added CUSIPs are still required to supply valid
-    # values in the handler below.
-    purchase_price: float | None = None
-    quantity: float | None = None
+    coupon_rate: float | None = None  # annual coupon as a PERCENT (e.g. 5.25)
+    maturity_date: str | None = None  # ISO "YYYY-MM-DD"
+    price: float | None = None        # market price quoted per 100 of par
+    quantity: int | None = None       # number of bonds held ($1,000 face each)
+    purchase_date: str | None = None  # ISO "YYYY-MM-DD"
 
 
 class BondsSyncRequest(BaseModel):
     bonds: list[BondInput]
     is_defensive: bool
 
-
+'''
+    REVIEW THIS ROUTE. Sometimes if bonds are deleted, then won't be updated inside of the
+    database. Check this and fix
+'''
 @router.post("")
 def syncBonds(
     user_id: Annotated[UUID, Cookie()],
@@ -50,11 +51,23 @@ def syncBonds(
 ):
     """Replace the user's bond list for the given investor type.
 
-    For each bond in `body.bonds` (keyed by CUSIP):
-      - If the CUSIP is already in the stored row, reuse its enriched entry and
-        overwrite `purchase_price`/`quantity` when the request supplies them.
-      - Otherwise, call `classify_bond` to look up grade + metrics fresh. A new
-        CUSIP must carry `purchase_price > 0` and `quantity > 0`.
+    The same CUSIP can appear as multiple distinct lots (different purchase
+    date / price / maturity / coupon) — the frontend only merges an incoming
+    entry into an existing one when every field except quantity matches, so by
+    the time a request lands here, each entry is already a lot the user wants
+    tracked separately.
+
+    For each incoming lot:
+      - If a stored lot with the same CUSIP + coupon_rate + maturity_date +
+        price + purchase_date already exists, reuse its classification
+        (grade/ytm/spread/bond_type) instead of re-classifying — those are the
+        only fields `classify_bond` uses, so an exact match guarantees the
+        same result. Quantity is still refreshed from the incoming item, since
+        the frontend increments it in place rather than sending a new lot.
+      - Otherwise, call `classify_bond` (passing the user's price + purchase
+        date) to look up grade + metrics fresh, then attach the user-supplied
+        price / quantity / purchase_date so they persist and round-trip back
+        to the client.
 
     The full enriched array is UPSERTed into `bonds_table` keyed on
     `(user_id, is_defensive)`. Returns the full enriched array.
@@ -66,19 +79,18 @@ def syncBonds(
             detail="FRED_API_KEY is not configured on the server",
         )
 
-    # Normalise + dedupe by CUSIP (case-insensitive, stored uppercase). For a
-    # duplicate CUSIP the last-seen price/quantity wins (treat it as an edit).
-    cleaned: dict[str, dict] = {}
-    order: list[str] = []
+    # Group by CUSIP (case-insensitive, stored uppercase) into a hash map of
+    # CUSIP -> list of lots. Unlike a `seen` set, this does not collapse
+    # repeated CUSIPs — different lots of the same bond are kept as separate
+    # entries in the array.
+    cleaned_bonds: dict[str, list[BondInput]] = {}
     for item in body.bonds:
         if not isinstance(item.cusip, str):
             continue
         c = item.cusip.strip().upper()
         if not c:
             continue
-        if c not in cleaned:
-            order.append(c)
-        cleaned[c] = {"purchase_price": item.purchase_price, "quantity": item.quantity}
+        cleaned_bonds.setdefault(c, []).append(item)
 
     with SessionLocal() as session:
         try:
@@ -90,55 +102,60 @@ def syncBonds(
                 {"uid": str(user_id), "isd": body.is_defensive},
             ).first()
 
-            existing_map = {}
+            # Group stored entries by CUSIP too — a CUSIP can have more than
+            # one stored lot.
+            existing_map: dict[str, list[dict]] = {}
             if existing_row and existing_row[0]:
                 for entry in existing_row[0]:
                     if isinstance(entry, dict) and entry.get("cusip"):
-                        existing_map[entry["cusip"]] = entry
+                        existing_map.setdefault(entry["cusip"], []).append(entry)
+
+            print(
+                f"[BOND] syncBonds: user={user_id} is_defensive={body.is_defensive} "
+                f"incoming={[(c, i.coupon_rate, i.maturity_date, i.price, i.quantity, i.purchase_date) for c, items in cleaned_bonds.items() for i in items]} "
+                f"existing_cusips={list(existing_map.keys())}",
+                flush=True,
+            )
 
             new_bonds = []
-            for cusip in order:
-                price = cleaned[cusip]["purchase_price"]
-                qty = cleaned[cusip]["quantity"]
+            for cusip, items in cleaned_bonds.items():
+                stored_lots = existing_map.get(cusip, [])
+                for item in items:
+                    match = next(
+                        (
+                            e for e in stored_lots
+                            if e.get("coupon_rate") == item.coupon_rate
+                            and e.get("maturity_date") == item.maturity_date
+                            and e.get("price") == item.price
+                            and e.get("purchase_date") == item.purchase_date
+                        ),
+                        None,
+                    )
+                    if match:
+                        # Same lot already classified — reuse the classification.
+                        print(f"[BOND] syncBonds: {cusip} lot reused from stored row (not re-classified)", flush=True)
+                        enriched = dict(match)
+                    else:
+                        enriched = classify_bond(
+                            cusip,
+                            session,
+                            fred_api_key,
+                            price_per_100=item.price,
+                            coupon_rate_pct=item.coupon_rate,
+                            maturity_date_str=item.maturity_date,
+                            purchase_date_str=item.purchase_date,
+                        )
+                        print(f"[BOND] syncBonds: {cusip} lot classified -> {enriched}", flush=True)
 
-                if cusip in existing_map:
-                    # Reuse the enriched grade/metrics; overwrite price/qty only
-                    # when the request supplied valid values (a user edit).
-                    entry = dict(existing_map[cusip])
-                    if price is not None:
-                        if price <= 0:
-                            raise HTTPException(
-                                status_code=400,
-                                detail=f"purchase_price must be > 0 for {cusip}",
-                            )
-                        entry["purchase_price"] = price
-                    if qty is not None:
-                        if qty <= 0:
-                            raise HTTPException(
-                                status_code=400,
-                                detail=f"quantity must be > 0 for {cusip}",
-                            )
-                        entry["quantity"] = qty
-                    # Guarantee the keys exist even for legacy rows that lacked them.
-                    entry.setdefault("purchase_price", price)
-                    entry.setdefault("quantity", qty)
-                    new_bonds.append(entry)
-                else:
-                    # New CUSIP — price + quantity are required and must be positive.
-                    if price is None or price <= 0:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"purchase_price must be > 0 for new bond {cusip}",
-                        )
-                    if qty is None or qty <= 0:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"quantity must be > 0 for new bond {cusip}",
-                        )
-                    classified = classify_bond(cusip, session, fred_api_key)
-                    classified["purchase_price"] = price
-                    classified["quantity"] = qty
-                    new_bonds.append(classified)
+                    # Persist the user-supplied holding fields with the analysis.
+                    # Refreshed even on reuse, since quantity can change without
+                    # the lot's classification-relevant fields changing.
+                    enriched["coupon_rate"] = item.coupon_rate
+                    enriched["maturity_date"] = item.maturity_date
+                    enriched["price"] = item.price
+                    enriched["quantity"] = item.quantity
+                    enriched["purchase_date"] = item.purchase_date
+                    new_bonds.append(enriched)
 
             session.execute(
                 text("""
@@ -166,7 +183,9 @@ def syncBonds(
                 detail=f"Failed to sync bonds: {exc}",
             )
 
-
+'''
+    Used to get the list of bonds that the user when user first enters the page
+'''
 @router.get("")
 def getBonds(
     user_id: Annotated[UUID, Cookie()],
