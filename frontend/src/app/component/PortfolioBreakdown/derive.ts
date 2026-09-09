@@ -3,7 +3,7 @@
 // PieView stay presentational and makes the levels trivially testable.
 
 import type { BondEntry } from "@/app/component/BondList/BondList";
-import { STOCKS_COLOR, BONDS_COLOR, ETF_COLOR, BOND_ETF_COLOR, pickColor, gradeColor } from "./colors";
+import { STOCKS_COLOR, BONDS_COLOR, ETF_COLOR, BOND_ETF_COLOR, pickColors, gradeColor } from "./colors";
 import type { Breakdown, BondNode, Frame, Slice } from "./types";
 
 // Build the bonds half of the breakdown from the shared BondList state so it
@@ -154,45 +154,49 @@ export function slicesFor(frame: Frame, bd: Breakdown, push: (f: Frame) => void)
       for (const e of bd.equities) {
         bySector.set(e.sector, (bySector.get(e.sector) ?? 0) + e.market_value);
       }
-      return [...bySector.entries()].map(([sector, value]) => ({
+      const entries = [...bySector.entries()];
+      const colors = pickColors(entries.map(([sector]) => sector));
+      return entries.map(([sector, value], i) => ({
         label: sector,
         value,
-        color: pickColor(sector),
+        color: colors[i],
         onClick: () => push({ level: "L3E", sector }),
       }));
     }
 
     case "L3E": {
       // Leaf: individual stocks within the chosen sector. No further drill.
-      return bd.equities
-        .filter((e) => e.sector === frame.sector)
-        .map((e) => ({
-          label: e.symbol,
-          value: e.market_value,
-          color: pickColor(e.symbol),
-          onClick: () => {},
-        }));
+      const inSector = bd.equities.filter((e) => e.sector === frame.sector);
+      const colors = pickColors(inSector.map((e) => e.symbol));
+      return inSector.map((e, i) => ({
+        label: e.symbol,
+        value: e.market_value,
+        color: colors[i],
+        onClick: () => {},
+      }));
     }
 
     case "L2T": {
-      return bd.etfs.map((e) => ({
+      const colors = pickColors(bd.etfs.map((e) => e.symbol));
+      return bd.etfs.map((e, i) => ({
         label: e.symbol,
         value: e.market_value,
-        color: pickColor(e.symbol),
+        color: colors[i],
         onClick: () => push({ level: "L3T", etfSymbol: e.symbol }),
       }));
     }
 
     case "L3T": {
-      // Leaf: the ETF's sector mix (weights, not dollars). Colored by the same
-      // pickColor(sector) the equities-by-sector level uses, so a sector keeps
-      // one color wherever it appears.
+      // Leaf: the ETF's sector mix (weights, not dollars). Colored from the same
+      // palette the equities-by-sector level uses, so a sector keeps one color
+      // wherever it appears — deduped so no two wedges here look alike.
       const etf = bd.etfs.find((e) => e.symbol === frame.etfSymbol);
       if (!etf) return [];
-      return etf.sector_weights.map((s) => ({
+      const colors = pickColors(etf.sector_weights.map((s) => s.sector));
+      return etf.sector_weights.map((s, i) => ({
         label: s.sector,
         value: s.weight_pct,
-        color: pickColor(s.sector),
+        color: colors[i],
         onClick: () => {},
       }));
     }
@@ -219,10 +223,11 @@ export function slicesFor(frame: Frame, bd: Breakdown, push: (f: Frame) => void)
     }
 
     case "L2BE": {
-      return bd.bond_etfs.map((e) => ({
+      const colors = pickColors(bd.bond_etfs.map((e) => e.symbol));
+      return bd.bond_etfs.map((e, i) => ({
         label: e.symbol,
         value: e.market_value,
-        color: pickColor(e.symbol),
+        color: colors[i],
         onClick: () => push({ level: "L3BE", etfSymbol: e.symbol }),
       }));
     }
