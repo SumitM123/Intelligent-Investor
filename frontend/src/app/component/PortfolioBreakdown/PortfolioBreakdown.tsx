@@ -256,7 +256,7 @@ export default function PortfolioBreakdown({ isDefensive, hasSnapTradeUser }: Pr
             })()
           ) : current.level === "L3T" && slices.length === 0 ? (
             <div className="rounded-lg border border-dashed border-[var(--border-strong)] bg-[var(--surface-muted)] p-8 text-center text-sm text-[var(--muted)]">
-              Top holdings not available for {current.etfSymbol}.
+              Sector breakdown not available for {current.etfSymbol}.
             </div>
           ) : current.level === "L3BE" && slices.length === 0 ? (
             <div className="rounded-lg border border-dashed border-[var(--border-strong)] bg-[var(--surface-muted)] p-8 text-center text-sm text-[var(--muted)]">

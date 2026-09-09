@@ -1,7 +1,7 @@
 // Shared interfaces for the drill-down portfolio breakdown.
 
-export interface TopHolding {
-  symbol: string;
+export interface SectorWeight {
+  sector: string;
   weight_pct: number;
 }
 
@@ -12,10 +12,11 @@ export interface EquityPosition {
   industry: string;
 }
 
+// An equity ETF drills into its sector mix — the fund's actual diversification.
 export interface EtfPosition {
   symbol: string;
   market_value: number;
-  top_holdings: TopHolding[];
+  sector_weights: SectorWeight[];
 }
 
 export interface RatingWeight {
@@ -23,9 +24,11 @@ export interface RatingWeight {
   weight_pct: number;
 }
 
-// A bond fund holds thousands of issues, so it carries no top_holdings; its
-// composition is charted as credit quality instead.
-export interface BondEtfPosition extends EtfPosition {
+// A bond fund has no meaningful sector mix (yfinance returns {} for BND), so it
+// drills into credit quality instead.
+export interface BondEtfPosition {
+  symbol: string;
+  market_value: number;
   credit_quality: RatingWeight[];
 }
 
