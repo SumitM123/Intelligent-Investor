@@ -24,7 +24,7 @@ from sqlalchemy import text
 
 from database import SessionLocal
 from routes.snapTrade import fetch_positions_for_account
-from routes.stocks import resolve_symbols, _fetch_etf_top_holdings, _fetch_bond_etf_ratings
+from routes.stocks import resolve_symbols, _fetch_etf_sector_weights, _fetch_bond_etf_ratings
 
 
 router = APIRouter(prefix="/api/portfolio")
@@ -78,7 +78,6 @@ def portfolio_breakdown(
                     bond_etfs.append({
                         "symbol": symbol,
                         "market_value": market_value,
-                        "top_holdings": [],
                         "credit_quality": _fetch_bond_etf_ratings(symbol),
                     })
                     bond_etfs_total += market_value
@@ -86,7 +85,7 @@ def portfolio_breakdown(
                     etfs.append({
                         "symbol": symbol,
                         "market_value": market_value,
-                        "top_holdings": _fetch_etf_top_holdings(symbol),
+                        "sector_weights": _fetch_etf_sector_weights(symbol),
                     })
                     stocks_total += market_value
             else:

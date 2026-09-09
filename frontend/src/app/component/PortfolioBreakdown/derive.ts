@@ -89,7 +89,7 @@ export function titleFor(frame: Frame): string {
     case "L3E":
       return `${frame.sector} stocks`;
     case "L3T":
-      return `${frame.etfSymbol} top holdings`;
+      return `${frame.etfSymbol} by sector`;
     case "L3BE":
       return `${frame.etfSymbol} credit quality`;
     case "L3B":
@@ -184,16 +184,15 @@ export function slicesFor(frame: Frame, bd: Breakdown, push: (f: Frame) => void)
     }
 
     case "L3T": {
-      // Leaf: top holdings inside the chosen ETF (weights, not dollars). The
-      // ETF may sit on either half, so search both lists.
-      const etf =
-        bd.etfs.find((e) => e.symbol === frame.etfSymbol) ??
-        bd.bond_etfs.find((e) => e.symbol === frame.etfSymbol);
+      // Leaf: the ETF's sector mix (weights, not dollars). Colored by the same
+      // pickColor(sector) the equities-by-sector level uses, so a sector keeps
+      // one color wherever it appears.
+      const etf = bd.etfs.find((e) => e.symbol === frame.etfSymbol);
       if (!etf) return [];
-      return etf.top_holdings.map((h) => ({
-        label: h.symbol,
-        value: h.weight_pct,
-        color: pickColor(h.symbol),
+      return etf.sector_weights.map((s) => ({
+        label: s.sector,
+        value: s.weight_pct,
+        color: pickColor(s.sector),
         onClick: () => {},
       }));
     }

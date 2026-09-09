@@ -24,45 +24,48 @@ def _fetch_etf_weights(symbol: str) -> dict | None:
     return weights
 
 
-def _fetch_etf_top_holdings(symbol: str) -> list[dict]:
-    """Return [{symbol, weight_pct}] for an ETF's largest holdings via yfinance.
+# yfinance emits sector keys as lowercase snake_case; FMP (used for individual
+# equities) emits Title Case. Mapping onto FMP's vocabulary lets the ETF sector
+# pie and the equities-by-sector pie share one set of names — and therefore one
+# set of colors — across drill levels.
+_YF_SECTOR_LABELS = {
+    "technology": "Technology",
+    "financial_services": "Financial Services",
+    "communication_services": "Communication Services",
+    "consumer_cyclical": "Consumer Cyclical",
+    "consumer_defensive": "Consumer Defensive",
+    "healthcare": "Healthcare",
+    "industrials": "Industrials",
+    "energy": "Energy",
+    "utilities": "Utilities",
+    "realestate": "Real Estate",
+    "basic_materials": "Basic Materials",
+}
 
-    `funds_data.top_holdings` is a DataFrame indexed by ticker with a weight
-    column ("Holding Percent") expressed as a fraction. Returns [] on any
-    failure or when no holdings are available (common for non-US / leveraged
-    funds). Not cached, for the same reason as `_fetch_etf_weights`.
+
+def _fetch_etf_sector_weights(symbol: str) -> list[dict]:
+    """Return [{sector, weight_pct}] for an equity ETF, largest slice first.
+
+    This is the fund's actual diversification. It replaces the top-10 holdings
+    view, which covered only ~38% of a fund like VOO and said nothing about the
+    remaining ~490 positions. yfinance reports fractions, so scale to percent.
     """
-    try:
-        holdings = yf.Ticker(symbol).funds_data.top_holdings
-    except Exception as exc:
-        print(f"[YF ERR] top_holdings symbol={symbol} exc={exc}", flush=True)
-        return []
-    if holdings is None or getattr(holdings, "empty", True):
-        return []
-    # Tolerate casing/spacing drift in the weight column name.
-    pct_col = None
-    for col in holdings.columns:
-        if "percent" in str(col).lower():
-            pct_col = col
-            break
-    if pct_col is None:
+    weights = _fetch_etf_weights(symbol)
+    if not isinstance(weights, dict):
         return []
     out: list[dict] = []
-    try:
-        for idx, row in holdings.iterrows():
-            weight = row[pct_col]
-            if weight is None:
-                continue
-            try:
-                w = float(weight)
-            except (TypeError, ValueError):
-                continue
-            if w != w:  # NaN guard
-                continue
-            out.append({"symbol": str(idx).upper(), "weight_pct": round(w * 100, 2)})
-    except Exception as exc:
-        print(f"[YF ERR] top_holdings parse symbol={symbol} exc={exc}", flush=True)
-        return []
+    for key, raw in weights.items():
+        try:
+            pct = float(raw or 0) * 100
+        except (TypeError, ValueError):
+            continue
+        if pct < 0.05:  # skip slivers that would render a "0.0%" legend row
+            continue
+        out.append({
+            "sector": _YF_SECTOR_LABELS.get(key) or key.replace("_", " ").title(),
+            "weight_pct": round(pct, 2),
+        })
+    out.sort(key=lambda row: row["weight_pct"], reverse=True)
     return out
 
 
@@ -88,7 +91,7 @@ def _fetch_bond_etf_ratings(symbol: str) -> list[dict]:
     Bond funds hold thousands of individual issues, so yfinance exposes no
     top_holdings for them. Credit quality is the meaningful composition to chart
     instead, and it lands on the same grade vocabulary the manually entered
-    bonds already use. Returns [] on any failure, matching _fetch_etf_top_holdings.
+    bonds already use. Returns [] on any failure, matching _fetch_etf_sector_weights.
     """
     try:
         ratings = yf.Ticker(symbol).funds_data.bond_ratings
