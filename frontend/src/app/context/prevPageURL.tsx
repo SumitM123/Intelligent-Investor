@@ -1,43 +1,36 @@
 "use client"
 
 import { useState, useContext, createContext, Dispatch, SetStateAction, ReactNode } from 'react';
+
+// `connectionID`, `accountID` and `prevPageURL` used to live here: the old wizard kept the
+// SnapTrade connection in React state and routed off it, which is exactly why a refresh
+// dead-ended on "Connection ID is missing". Connection state is now read live from
+// `GET /api/snapTrade/connections`, so none of it belongs in context any more.
 interface prevPageContext {
-    prevPageURL: string;
-    setPrevPage: Dispatch<SetStateAction<string>>;
-    connectionID: string;
-    setConnectionID: Dispatch<SetStateAction<string>>;
-    accountID: string;
-    setAccountID: Dispatch<SetStateAction<string>>;
     uriGenerationString: string;
-    setURIGenerationString: Dispatch<SetStateAction<string>>
+    setURIGenerationString: Dispatch<SetStateAction<string>>;
 }
+
 export const prevPageContext = createContext<prevPageContext | null>(null);
+
 export function usePrevPageContext () {
     const context = useContext(prevPageContext);
     if (!context) {
-        throw new Error("useUserContext must be used within a UserContextProvider");
+        throw new Error("usePrevPageContext must be used within a PrevPageContextProvider");
     }
     return context;
 }
+
 export function PrevPageContextProvider({ children } : {children: ReactNode}) {
-    const [prevPage, setPrevPage] = useState("No value");
-    const [connectionID, setConnectionID] = useState("No value");
-    const [accountID, setAccountID] = useState("No value");
     const [uriGenerationString, setURIGenerationString] = useState("");
     const value = {
-        prevPageURL: prevPage,
-        setPrevPage,
-        connectionID: connectionID,
-        setConnectionID,
-        accountID,
-        setAccountID,
         uriGenerationString,
         setURIGenerationString,
     };
-    
+
     return (
-        <prevPageContext.Provider value={value}> 
-            {children} 
+        <prevPageContext.Provider value={value}>
+            {children}
         </prevPageContext.Provider>
     );
 }
