@@ -68,7 +68,21 @@ export interface Breakdown {
 export interface AccountOption {
   id: string;
   name: string;
-  brokerage_name?: string | null;
+  number?: string | null;
+  institution_name?: string | null;
+  balance?: number | null;
+  // Only /api/snapTrade/list_accounts returns this; the per-connection route omits it
+  // because every account it returns belongs to the connection that was asked for.
+  connection_id?: string | null;
+}
+
+// One live brokerage connection, as reported by GET /api/snapTrade/connections.
+// Never persisted client-side: it is re-read on every mount so it survives a refresh
+// and reflects a connection revoked outside the app.
+export interface BrokerConnection {
+  id: string;
+  institution_name: string;
+  created_date?: string | null;
 }
 
 // One frame of the drill stack. The top frame is the level currently on screen.
