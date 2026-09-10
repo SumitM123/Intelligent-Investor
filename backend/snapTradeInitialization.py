@@ -4,6 +4,8 @@ from snaptrade_client.auth import SnapTradeAuth
 import uuid
 import os
 
+from snaptrade_client.auth import SnapTradeAuth
+
 snapTrade = SnapTrade(
     auth=SnapTradeAuth.commercial_api_key(
         consumer_key=os.environ["SNAPTRADE_SECRET"],

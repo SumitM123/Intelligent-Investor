@@ -82,6 +82,36 @@ body {
 @keyframes fade-up { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 .fade-up { animation: fade-up 0.4s ease-out backwards; }
 
+/* Range sliders (allocation bands on the user profile form). Every colour is a token
+   that already flips under prefers-color-scheme, so one rule set covers both themes. */
+.range-band { appearance: none; -webkit-appearance: none; background: transparent; width: 100%; height: 1.5rem; cursor: pointer; }
+.range-band::-webkit-slider-runnable-track {
+  height: 6px; border-radius: 9999px;
+  background: var(--surface-muted); border: 1px solid var(--border);
+}
+.range-band::-moz-range-track {
+  height: 6px; border-radius: 9999px;
+  background: var(--surface-muted); border: 1px solid var(--border);
+}
+.range-band::-webkit-slider-thumb {
+  appearance: none; -webkit-appearance: none;
+  width: 18px; height: 18px; margin-top: -7px; border-radius: 9999px;
+  background: var(--accent); border: 2px solid var(--surface);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+}
+.range-band::-moz-range-thumb {
+  width: 18px; height: 18px; border-radius: 9999px;
+  background: var(--accent); border: 2px solid var(--surface);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+}
+.range-band:focus-visible { outline: none; }
+.range-band:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--accent) 25%, transparent);
+}
+.range-band:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--accent) 25%, transparent);
+}
+
 /* Subtle scrollbar */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }

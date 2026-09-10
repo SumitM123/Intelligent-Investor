@@ -53,6 +53,9 @@ export async function passSignInProps(formData: FormData) {
     if (!userId) {
         throw new Error("Backend did not return user_id");
     }
+    // True whenever there's no user_profile row yet — so a brand-new user goes straight to
+    // the questionnaire, and so does anyone who signed up but abandoned it partway.
+    const needsProfile = addUserData?.needs_profile === true;
 
     const snapTradeRes = await fetch("http://backend:8000/api/snapTrade/addUser", {
         method: "POST",
@@ -82,7 +85,7 @@ export async function passSignInProps(formData: FormData) {
     cookieStore.set("snapTradeUserID", snapTradeID, cookieOptions);
 
     revalidatePath("/");
-    redirect("/");
+    redirect(needsProfile ? "/pages/userProfile" : "/");
 }
 
 export async function signOutAction() {

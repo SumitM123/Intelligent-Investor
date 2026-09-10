@@ -22,6 +22,19 @@ _MIN_GAP_SECONDS = 60.0
     next key is used. Bypassing the wait-time needed. 
 '''
 
+def assert_user_exists(session, user_id) -> None:
+    '''
+        Raises 401 unless user_id is present in users_id. Takes the caller's session so the
+        check joins the caller's transaction rather than opening a second one.
+    '''
+    row = session.execute(
+        text("SELECT 1 FROM users_id WHERE user_id = :user_id LIMIT 1"),
+        {"user_id": user_id},
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+
+
 def fetch_av(function: str, symbol: Optional[str] = None, **kwargs) -> dict:
     api_key = os.environ["ALPHA_VANTAGE_API_LEADING_STOCK"]
     params = {"function": function, "apikey": api_key}

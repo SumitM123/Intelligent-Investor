@@ -118,6 +118,113 @@ def generateConnectionPortal(
 
     return {"redirectURI": urlToClient}
 
+
+@router.get("/connections")
+def listConnections(
+    snapTrade_id: Annotated[str, Cookie(alias="snapTradeUserID")],
+):
+    '''
+        Live list of this user's usable brokerage connections.
+
+        This is the "am I connected?" source of truth. It is read from SnapTrade on every
+        request and never cached, so it survives a page refresh and reflects a connection the
+        user removed at their brokerage (or in SnapTrade's own portal) without telling us.
+
+        Entries flagged `disabled` are dropped: SnapTrade keeps the authorization record
+        around after it expires or is revoked, so "still listed" does not mean "still usable".
+    '''
+    snaptrade_usersecret_id = getSnapTradeSecretID(snapTrade_id)
+
+    try:
+        response = snapTrade.connections.list_brokerage_authorizations(
+            user_id=snapTrade_id,
+            user_secret=snaptrade_usersecret_id,
+        )
+    except Exception as exc:
+        print("Error listing brokerage authorizations: " + str(exc), flush=True)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to reach the SnapTrade connections endpoint",
+        )
+
+    authorizations = getattr(response, "body", response) or []
+    if not isinstance(authorizations, list):
+        authorizations = []
+
+    connections = []
+    for auth in authorizations:
+        if not isinstance(auth, dict):
+            continue
+        if auth.get("disabled"):
+            continue
+
+        brokerage = auth.get("brokerage")
+        brokerage = brokerage if isinstance(brokerage, dict) else {}
+        institution_name = (
+            brokerage.get("display_name")
+            or brokerage.get("name")
+            or auth.get("name")
+            or "Brokerage"
+        )
+
+        connections.append({
+            "id": auth.get("id"),
+            "institution_name": institution_name,
+            "created_date": auth.get("created_date"),
+        })
+
+    # Newest first. created_date is ISO 8601 from SnapTrade, so a plain string sort orders
+    # correctly; entries missing a date sort last.
+    connections.sort(key=lambda c: c["created_date"] or "", reverse=True)
+
+    return {"connections": connections}
+
+
+@router.delete("/connection/{connection_id}")
+def removeConnection(
+    connection_id: str,
+    snapTrade_id: Annotated[str, Cookie(alias="snapTradeUserID")],
+):
+    '''
+        Unlink one brokerage connection.
+
+        SnapTrade's delete is ASYNCHRONOUS: a 200 means the removal was queued, not that it
+        has already taken effect, so an immediate re-read of /connections may still list the
+        connection. The frontend clears its own state instead of waiting for the list to
+        catch up.
+    '''
+    snaptrade_usersecret_id = getSnapTradeSecretID(snapTrade_id)
+
+    try:
+        snapTrade.connections.delete_connection(
+            connection_id=connection_id,
+            user_id=snapTrade_id,
+            user_secret=snaptrade_usersecret_id,
+        )
+    except Exception as exc:
+        print("Error removing brokerage authorization: " + str(exc), flush=True)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to remove the brokerage connection",
+        )
+
+    # Best effort: clear rows left behind by the account cache that getAllAccountsFromConnection
+    # used to write. The disconnect at SnapTrade already succeeded, so a failure to tidy up
+    # locally must not surface to the caller as an error.
+    with SessionLocal() as session:
+        try:
+            session.execute(
+                text("DELETE FROM snaptrade_connection_accounts WHERE connection_id = :cid"),
+                {"cid": connection_id},
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
+            print(f"Could not clear cached accounts for connection {connection_id}", flush=True)
+
+    return {"disconnected": connection_id}
+
+
 @router.get("/getAllAccountsFromConnection")
 def getAllAccountsFromConnection(
     snapTrade_id: Annotated[str, Cookie(alias="snapTradeUserID")],
@@ -126,7 +233,12 @@ def getAllAccountsFromConnection(
     '''
         snaptrade_id: uuid, connection_id: str
 
-        You have a table with schema snaptrade_id, connection_id, arrayOfAllAccounts
+        The USD accounts belonging to one brokerage connection.
+
+        Deliberately uncached. Connections are disposable — each connect mints a new
+        connection_id and a disconnect can happen without us being told — so a permanent
+        cache keyed by connection_id is guaranteed to go stale, and balances change by the
+        minute regardless. Always read live from SnapTrade.
     '''
     # Resolve the SnapTrade secret first; if missing/invalid, fail with invalid request.
     try:
@@ -143,76 +255,36 @@ def getAllAccountsFromConnection(
             detail="Invalid request: SnapTrade secret was not found for this user",
         )
 
-    # Fast path: return cached JSONB accounts by connection_id.
-    with SessionLocal() as session:
-        existing_row = session.execute(
-            text(
-                """
-                SELECT accounts
-                FROM snaptrade_connection_accounts
-                WHERE connection_id = :connection_id
-                LIMIT 1
-                """
-            ),
-            {"connection_id": connection_id},
-        ).first()
-
-    if existing_row is not None:
-        raw_accounts = existing_row[0] or []
-        accountsForConnection = []
-
-        # Ensure each entry is returned as an account object (dict).
-        for account_json in raw_accounts:
-            if isinstance(account_json, dict):
-                accountsForConnection.append(account_json)
-            else:
-                try:
-                    import json
-                    accountsForConnection.append(json.loads(account_json))
-                except Exception:
-                    continue
-
-        return {"accounts_connection": accountsForConnection}
-
-    # Cache miss: fetch from SnapTrade, filter for this connection + USD, then persist.
     allAccountsFromAllConnection = snapTrade.account_information.list_user_accounts(
         user_id=snapTrade_id,
         user_secret=snaptrade_usersecret_id,
     ).body
-    print("Successful getting the usersecret id and the all the accounts")
-    print("All the accounts from all connection", allAccountsFromAllConnection)
+    if not isinstance(allAccountsFromAllConnection, list):
+        allAccountsFromAllConnection = []
 
     accountsForConnection = []
     for brokerageAccount in allAccountsFromAllConnection:
-        if brokerageAccount["brokerage_authorization"] == connection_id and brokerageAccount["balance"]["total"]["currency"] == "USD":
-            accountsForConnection.append(brokerageAccount)
+        if not isinstance(brokerageAccount, dict):
+            continue
+        if brokerageAccount.get("brokerage_authorization") != connection_id:
+            continue
 
-    print("The accounts that are under the connection:", accountsForConnection)
+        balance = brokerageAccount.get("balance") or {}
+        total = balance.get("total") or {}
+        if total.get("currency") != "USD":
+            continue
 
-    with SessionLocal() as session:
-        try:
-            import json
+        # Trimmed to what the account picker actually renders, so the response shape is an
+        # explicit contract rather than whatever SnapTrade happens to return.
+        accountsForConnection.append({
+            "id": brokerageAccount.get("id"),
+            "name": brokerageAccount.get("name") or "Brokerage account",
+            "number": brokerageAccount.get("number"),
+            "institution_name": brokerageAccount.get("institution_name"),
+            "balance": total.get("amount"),
+        })
 
-            session.execute(
-                text(
-                    """
-                    INSERT INTO snaptrade_connection_accounts (snaptrade_id, connection_id, accounts)
-                    VALUES (:snaptrade_id, :connection_id, CAST(:accounts AS jsonb))
-                    ON CONFLICT (connection_id) DO UPDATE SET
-                        snaptrade_id = EXCLUDED.snaptrade_id,
-                        accounts = EXCLUDED.accounts
-                    """
-                ),
-                {
-                    "snaptrade_id": snapTrade_id,
-                    "connection_id": connection_id,
-                    "accounts": json.dumps(accountsForConnection),
-                },
-            )
-            session.commit()
-        except Exception:
-            session.rollback()
-            raise
+    print(f"Accounts under connection {connection_id}: {len(accountsForConnection)}", flush=True)
 
     return {"accounts_connection": accountsForConnection}
 
@@ -378,7 +450,11 @@ def list_accounts(
         out.append({
             "id": account.get("id"),
             "name": account.get("name") or "Brokerage account",
-            "brokerage_name": account.get("brokerage_authorization"),
+            # institution_name is the human-readable brokerage ("Fidelity");
+            # brokerage_authorization is the connection's UUID, exposed under an honest
+            # name so the caller can tell which connection an account belongs to.
+            "institution_name": account.get("institution_name"),
+            "connection_id": account.get("brokerage_authorization"),
         })
     return {"accounts": out}
 

@@ -127,4 +127,31 @@ CREATE TABLE IF NOT EXISTS fred_oas_spreads (
     fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Per-user investing profile captured by the /pages/userProfile questionnaire.
+-- One row per user (user_id is the PK), so POST creates and PUT updates in place.
+-- Bond percent is deliberately NOT stored: it is always 100 - stock_pct, and the
+-- BETWEEN 25 AND 75 check therefore enforces Graham's 25/75 band on both sides at once.
+-- NULL on the 401(k) columns means "not applicable" (the branch was never taken);
+-- the trailing CHECKs make an incoherent branch impossible to persist.
+CREATE TABLE IF NOT EXISTS user_profile (
+    user_id               UUID PRIMARY KEY REFERENCES users_id(user_id) ON DELETE CASCADE,
+    monthly_investment    NUMERIC(12,2) NOT NULL CHECK (monthly_investment >= 0),
+    annual_income         NUMERIC(12,2) NOT NULL CHECK (annual_income >= 0),
+    stock_pct             SMALLINT NOT NULL CHECK (stock_pct BETWEEN 25 AND 75),
+    enterprising_pct      SMALLINT NOT NULL DEFAULT 0 CHECK (enterprising_pct BETWEEN 0 AND 10),
+    is_married            BOOLEAN NOT NULL,
+    home_state            TEXT NOT NULL CHECK (char_length(home_state) = 2),
+    is_employed           BOOLEAN NOT NULL,
+    has_401k              BOOLEAN,
+    has_401k_match        BOOLEAN,
+    match_rate_pct        NUMERIC(5,2) CHECK (match_rate_pct BETWEEN 0 AND 100),
+    match_limit_pct       NUMERIC(5,2) CHECK (match_limit_pct BETWEEN 0 AND 100),
+    k401_investment_types JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (is_employed OR has_401k IS NULL),
+    CHECK (has_401k IS TRUE OR has_401k_match IS NULL),
+    CHECK (has_401k_match IS TRUE OR (match_rate_pct IS NULL AND match_limit_pct IS NULL))
+);
+
 COMMIT;

@@ -88,7 +88,6 @@ CREATE TABLE IF NOT EXISTS fred_oas_spreads (
 CREATE TABLE IF NOT EXISTS bond_profile_cache (
     cusip          TEXT PRIMARY KEY,
     coupon_rate    FLOAT,
-    payment_freq   TEXT,
     maturity_date  DATE,
     face_value     FLOAT,
     bond_type      TEXT,
