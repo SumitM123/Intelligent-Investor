@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import DefensiveScreener from "@/app/component/DefensiveScreener/DefensiveScreener";
+import InvestorWorkspace from "@/app/component/InvestorWorkspace/InvestorWorkspace";
 import { type BondEntry } from "@/app/component/BondList/BondList";
 
 export default async function DefensivePage() {
@@ -45,7 +45,11 @@ export default async function DefensivePage() {
         </div>
       </header>
 
-      <DefensiveScreener initialBonds={initialBonds} hasSnapTradeUser={hasSnapTradeUser} />
+      <InvestorWorkspace
+        initialBonds={initialBonds}
+        hasSnapTradeUser={hasSnapTradeUser}
+        isDefensive={true}
+      />
     </div>
   );
 }

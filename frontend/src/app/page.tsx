@@ -1,45 +1,50 @@
-import { cookies } from "next/headers";
 import Link from "next/link";
-import { redirect } from "next/navigation";
 
-export default async function HomePage() {
-  const cookieStore = await cookies();
-  const userName = cookieStore.get("userName")?.value;
-
-  if (!userName) {
-    redirect("/pages/signIn");
-  }
-
-  const firstName = userName?.split(" ")[0] ?? "there";
-
+// Public landing page. `middleware.ts` bounces signed-in visitors straight to the
+// defensive page, so this is only ever rendered logged out — there is no session to
+// read here and no redirect to perform.
+export default function HomePage() {
   return (
     <div className="max-w-5xl mx-auto px-8 lg:px-12 py-14">
-      <p className="text-xs font-semibold tracking-widest text-[var(--accent)] uppercase">Welcome back</p>
+      <p className="text-xs font-semibold tracking-widest text-[var(--accent)] uppercase">
+        Intelligent Investor
+      </p>
       <h1 className="mt-3 text-3xl lg:text-4xl font-semibold tracking-tight">
-        Hello, {firstName}.
+        Graham&apos;s framework, run against your actual portfolio.
       </h1>
       <p className="mt-3 text-base text-[var(--muted)] max-w-2xl leading-relaxed">
-        Pick up where you left off, or start a new analysis. Graham would have approved of the boredom.
+        Connect a brokerage account and see every position scored against the criteria from
+        <em> The Intelligent Investor</em> — margin of safety, the 25–75% balance band, and the
+        seven tests a defensive stock has to pass.
       </p>
 
-      <div className="mt-10 grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="mt-8 flex items-center gap-3 flex-wrap">
+        <Link
+          href="/pages/signIn"
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-800 active:scale-[0.98] transition"
+        >
+          Get started
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <path d="M5 12h14M13 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </Link>
+        <p className="text-xs text-[var(--muted)]">
+          Credentials handled by SnapTrade. We never see them, and no trades are executed.
+        </p>
+      </div>
+
+      <div className="mt-12 grid sm:grid-cols-2 gap-4">
         <QuickLink
           href="/pages/typesOfInvestor"
           eyebrow="Start here"
           title="Choose your path"
-          desc="Switch between defensive and enterprising mode."
+          desc="Defensive or enterprising — the criteria differ, the discipline doesn't."
         />
         <QuickLink
           href="/pages/typesOfInvestor/defensivePage"
           eyebrow="Screen"
           title="Run Graham's seven tests"
           desc="Search the market for stocks that pass every check."
-        />
-        <QuickLink
-          href="/pages/typesOfInvestor/accountsChoosing"
-          eyebrow="Analyze"
-          title="Pull a brokerage account"
-          desc="Score real positions against the criteria."
         />
       </div>
 

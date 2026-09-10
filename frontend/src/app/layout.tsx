@@ -19,12 +19,15 @@ async function SidebarServer() {
   const cookieStore = await cookies();
   const userNameVal = cookieStore.get("userName")?.value;
   const profilePictureURL = cookieStore.get("profilePictureURL")?.value;
+  // Read server-side so the sidebar renders at its remembered width on the first paint.
+  const sidebarCollapsed = cookieStore.get("sidebarCollapsed")?.value === "1";
 
   return (
     <NavBar
       isSignedIn={!!(userNameVal && profilePictureURL)}
       userName={userNameVal || ""}
       profilePicture={profilePictureURL || ""}
+      defaultCollapsed={sidebarCollapsed}
     />
   );
 }
