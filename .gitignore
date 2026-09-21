@@ -9,3 +9,5 @@ __pycache__/
 playwright-mcp/
 .playwright-mcp/
 screenshots/
+# Added by ggshield
+.cache_ggshield
