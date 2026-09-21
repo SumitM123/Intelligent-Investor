@@ -3,13 +3,16 @@ from database import SessionLocal
 from fastapi import FastAPI, Response, status, HTTPException
 from sqlalchemy import text
 from uuid import UUID
+from datetime import datetime, timezone, timedelta, date
 import httpx
 import os
 import time
 from typing import Optional
+from snapTradeInitialization import snapTrade
 
 _AV_BASE = "https://www.alphavantage.co/query"
 _FMP_BASE = "https://financialmodelingprep.com/stable"
+_FINNHUB_BASE = "https://finnhub.io/api/v1"
 
 # TEMPORARY: per-key throttle. Tracks the monotonic timestamp of the last
 # successful request issued under each AlphaVantage API key, then blocks the
@@ -95,6 +98,64 @@ def fetch_fmp(path: str, **params):
         # FMP's "Error Message" body never contains the apikey, so it is safe to surface.
         raise HTTPException(status_code=502, detail=f"FMP error: {data['Error Message']}")
     return data
+
+
+def fetch_finnhub(endpoint: str, **params) -> dict:
+    api_key = os.environ["FINNHUB_API_KEY"]
+    query = {**params, "token": api_key}
+    url = f"{_FINNHUB_BASE}/{endpoint.lstrip('/')}"
+
+    # Never include `query` (carries the token) or `exc` (httpx embeds the full URL
+    # including the token in its string form) in log lines or client-facing details.
+    print(f"[FINNHUB REQ] endpoint={endpoint} params={params}", flush=True)
+    try:
+        resp = httpx.get(url, params=query, timeout=20)
+    except httpx.HTTPError as exc:
+        print(f"[FINNHUB HTTP-ERR] endpoint={endpoint} type={type(exc).__name__}", flush=True)
+        raise HTTPException(status_code=502, detail="Finnhub request failed")
+
+    if resp.status_code == 429:
+        print(f"[FINNHUB 429] endpoint={endpoint}", flush=True)
+        raise HTTPException(status_code=429, detail="Finnhub rate limit reached")
+    if resp.status_code >= 400:
+        print(f"[FINNHUB HTTP-ERR] endpoint={endpoint} status={resp.status_code}", flush=True)
+        raise HTTPException(status_code=502, detail=f"Finnhub request failed (status {resp.status_code})")
+
+    return resp.json()
+
+
+def _parse_snaptrade_datetime(raw) -> Optional[datetime]:
+    """Parse a SnapTrade timestamp field (datetime object or ISO string, per SDK version
+    drift), defaulting missing tzinfo to UTC. Same handling as getDividends in snapTrade.py."""
+    parsed = None
+    if isinstance(raw, datetime):
+        parsed = raw
+    elif isinstance(raw, str):
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            parsed = None
+
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def get_account_creation_date(snapTrade_id: str, snaptrade_usersecret_id: str, account_id: str) -> date:
+    """SnapTrade account creation date, falling back to a 10-year lookback when the
+    account details don't carry one or it can't be parsed. Same fallback as getDividends."""
+    account_detail_response = snapTrade.account_information.get_user_account_details(
+        user_id=snapTrade_id,
+        user_secret=snaptrade_usersecret_id,
+        account_id=account_id,
+    )
+    account_details = account_detail_response.body or {}
+    created_dt = _parse_snaptrade_datetime(account_details.get("created_date"))
+    if created_dt is None:
+        created_dt = datetime.now(timezone.utc) - timedelta(days=3650)
+    return created_dt.date()
 
 
 def get_eps_and_pe(symbol: str, current_price: float) -> dict:
