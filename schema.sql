@@ -154,4 +154,50 @@ CREATE TABLE IF NOT EXISTS user_profile (
     CHECK (has_401k_match IS TRUE OR (match_rate_pct IS NULL AND match_limit_pct IS NULL))
 );
 
+-- filing_status: added for the "Actual Retrieved" tax-estimate feature. Kept alongside
+-- is_married (not a replacement) since the existing /api/users/userProfile frontend form
+-- only sends is_married; filing_status defaults from it and is the field tax logic reads.
+ALTER TABLE user_profile ADD COLUMN IF NOT EXISTS filing_status TEXT;
+
+UPDATE user_profile
+SET filing_status = CASE WHEN is_married THEN 'married_filing_jointly' ELSE 'single' END
+WHERE filing_status IS NULL;
+
+ALTER TABLE user_profile ALTER COLUMN filing_status SET NOT NULL;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'user_profile_filing_status_check'
+    ) THEN
+        ALTER TABLE user_profile
+            ADD CONSTRAINT user_profile_filing_status_check
+            CHECK (filing_status IN (
+                'single', 'married_filing_jointly', 'married_filing_separately', 'head_of_household'
+            ));
+    END IF;
+END$$;
+
+-- Federal + state tax bracket reference data for the "Actual Retrieved" feature
+-- (backend/tax_calculator.py). One row per bracket segment. jurisdiction is 'FEDERAL'
+-- or a 2-letter state code (same format as user_profile.home_state). No-income-tax
+-- states (e.g. FL, TX, WA's wage income) are seeded with one explicit 0%-rate row per
+-- filing_status/tax_year rather than left absent, so a genuinely missing/unseeded
+-- combination (a data bug) is distinguishable from "this state has no income tax"
+-- (an intentional zero) at query time. Seed data lives in tax_brackets_seed.sql, not here.
+CREATE TABLE IF NOT EXISTS tax_brackets (
+    jurisdiction  TEXT     NOT NULL,
+    tax_type      TEXT     NOT NULL CHECK (tax_type IN ('ordinary_income', 'long_term_capital_gains', 'state_income')),
+    filing_status TEXT     NOT NULL CHECK (filing_status IN (
+                        'single', 'married_filing_jointly', 'married_filing_separately', 'head_of_household'
+                    )),
+    tax_year      SMALLINT NOT NULL,
+    bracket_order SMALLINT NOT NULL,
+    lower_bound   NUMERIC(14,2) NOT NULL CHECK (lower_bound >= 0),
+    upper_bound   NUMERIC(14,2),
+    rate          NUMERIC(6,5)   NOT NULL CHECK (rate BETWEEN 0 AND 1),
+    PRIMARY KEY (jurisdiction, tax_type, filing_status, tax_year, bracket_order),
+    CHECK (upper_bound IS NULL OR upper_bound > lower_bound)
+);
+
 COMMIT;
