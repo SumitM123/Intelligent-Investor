@@ -9,7 +9,7 @@ import re
 
 from database import SessionLocal
 from sqlalchemy import text
-from frequenty_used_methods import assert_user_exists, getSnapTradeSecretID, get_account_creation_date
+from frequenty_used_methods import assert_user_exists, getSnapTradeSecretID, fifo_lookback_start_date
 from tax_calculator import (
     ACCOUNT_TYPE_TAX_REQUIREMENTS,
     build_fifo_lots,
@@ -105,7 +105,7 @@ def estimateRetrieval(
     annual_income = float(annual_income)
 
     today = date.today()
-    account_created_date = get_account_creation_date(snapTrade_id, snaptrade_usersecret_id, account_id)
+    account_created_date = fifo_lookback_start_date()
 
     short_term_total = 0.0
     long_term_total = 0.0
