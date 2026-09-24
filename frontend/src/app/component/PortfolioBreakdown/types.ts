@@ -8,6 +8,9 @@ export interface SectorWeight {
 export interface EquityPosition {
   symbol: string;
   market_value: number;
+  // Shares held. Powers the sell-mode slider (dollars <-> shares) on SecurityList;
+  // per-share price is derived client-side as market_value / units.
+  units: number;
   sector: string;
   industry: string;
 }
@@ -16,6 +19,8 @@ export interface EquityPosition {
 export interface EtfPosition {
   symbol: string;
   market_value: number;
+  // See EquityPosition.units.
+  units: number;
   sector_weights: SectorWeight[];
 }
 
