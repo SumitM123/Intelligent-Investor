@@ -172,7 +172,12 @@ export default function BrokerageWorkspace({ broker, isDefensive }: Props) {
       </div>
 
       <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
-        <SecurityList breakdown={breakdown} frame={currentFrame} isDefensive={isDefensive} />
+        <SecurityList
+          breakdown={breakdown}
+          frame={currentFrame}
+          isDefensive={isDefensive}
+          accountId={selectedAccountId}
+        />
       </div>
     </>
   );
