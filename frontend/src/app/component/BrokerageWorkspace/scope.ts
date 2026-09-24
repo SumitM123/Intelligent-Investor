@@ -15,11 +15,25 @@ export interface SecurityRowData {
   detail: string;
   value: number;
   kind: "equity" | "etf" | "bond_etf" | "bond";
+  // Shares held — only set for equity/etf rows. Sell mode uses this (plus `value`
+  // as the dollar cap) for the slider; bond/bond_etf rows leave it undefined and
+  // are not sellable (they don't resolve through the tax-estimate backend, which
+  // looks up FIFO lot history and live quotes by market ticker).
+  units?: number;
 }
 
 export interface SecurityGroup {
   title: string;
   rows: SecurityRowData[];
+}
+
+// A row is sellable only if it's an equity/ETF with known shares held — bonds and
+// bond ETFs don't resolve through the tax-estimate backend (it looks up FIFO lot
+// history and live quotes by market ticker, not CUSIP, and bond ETFs don't carry
+// `units` today). Shared by SecurityList (filtering/gating) and SecurityRow
+// (per-row rendering) so the definition can't drift between the two.
+export function isSellable(row: SecurityRowData): boolean {
+  return (row.kind === "equity" || row.kind === "etf") && typeof row.units === "number" && row.units > 0;
 }
 
 export function scopeFor(frame: Frame): ListScope {
@@ -50,6 +64,7 @@ export function securitiesFor(bd: Breakdown, scope: ListScope): SecurityGroup[] 
       detail: e.sector || "Unclassified",
       value: e.market_value,
       kind: "equity" as const,
+      units: e.units,
     })),
   };
 
@@ -61,6 +76,7 @@ export function securitiesFor(bd: Breakdown, scope: ListScope): SecurityGroup[] 
       detail: "Equity fund",
       value: e.market_value,
       kind: "etf" as const,
+      units: e.units,
     })),
   };
 
