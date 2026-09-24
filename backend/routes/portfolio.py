@@ -85,6 +85,7 @@ def portfolio_breakdown(
                     etfs.append({
                         "symbol": symbol,
                         "market_value": market_value,
+                        "units": _safe_float(p.get("units")),
                         "sector_weights": _fetch_etf_sector_weights(symbol),
                     })
                     stocks_total += market_value
@@ -93,6 +94,7 @@ def portfolio_breakdown(
                 equities.append({
                     "symbol": symbol,
                     "market_value": market_value,
+                    "units": _safe_float(p.get("units")),
                     "sector": sector or "Unknown",
                     "industry": industry or "Unknown",
                 })
