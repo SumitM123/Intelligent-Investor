@@ -8,7 +8,6 @@ import httpx
 import os
 import time
 from typing import Optional
-from snapTradeInitialization import snapTrade
 
 _AV_BASE = "https://www.alphavantage.co/query"
 _FMP_BASE = "https://financialmodelingprep.com/stable"
@@ -143,19 +142,18 @@ def _parse_snaptrade_datetime(raw) -> Optional[datetime]:
     return parsed
 
 
-def get_account_creation_date(snapTrade_id: str, snaptrade_usersecret_id: str, account_id: str) -> date:
-    """SnapTrade account creation date, falling back to a 10-year lookback when the
-    account details don't carry one or it can't be parsed. Same fallback as getDividends."""
-    account_detail_response = snapTrade.account_information.get_user_account_details(
-        user_id=snapTrade_id,
-        user_secret=snaptrade_usersecret_id,
-        account_id=account_id,
-    )
-    account_details = account_detail_response.body or {}
-    created_dt = _parse_snaptrade_datetime(account_details.get("created_date"))
-    if created_dt is None:
-        created_dt = datetime.now(timezone.utc) - timedelta(days=3650)
-    return created_dt.date()
+# How far back to look for BUY/SELL history when reconstructing FIFO lots. Deliberately
+# NOT derived from SnapTrade's account `created_date`: that field can postdate a real
+# account's actual trading history (confirmed live -- an account resynced/re-issued
+# internally by SnapTrade reported created_date weeks after a genuine BUY activity still
+# present in its activity feed), which would silently truncate real lots out of the FIFO
+# replay. A fixed long lookback costs nothing extra (the brokerage just returns whatever
+# it actually retains) and can't under-fetch.
+ACTIVITY_LOOKBACK_DAYS = 3650
+
+
+def fifo_lookback_start_date() -> date:
+    return (datetime.now(timezone.utc) - timedelta(days=ACTIVITY_LOOKBACK_DAYS)).date()
 
 
 def get_eps_and_pe(symbol: str, current_price: float) -> dict:
