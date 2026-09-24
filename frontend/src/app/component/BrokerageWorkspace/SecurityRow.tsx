@@ -1,20 +1,60 @@
 "use client";
 
 import { evaluate } from "./criteria";
-import type { SecurityRowData } from "./scope";
+import SellPanel from "./SellPanel";
+import { isSellable, type SecurityRowData } from "./scope";
 
 interface Props {
   row: SecurityRowData;
   isDefensive: boolean;
   shareOfTotal: number;
+  mode: "view" | "sell";
   expanded: boolean;
   onToggle: () => void;
+  sellFraction: number;
+  onSellFractionChange: (fraction: number) => void;
 }
 
-export default function SecurityRow({ row, isDefensive, shareOfTotal, expanded, onToggle }: Props) {
+export default function SecurityRow({
+  row,
+  isDefensive,
+  shareOfTotal,
+  mode,
+  expanded,
+  onToggle,
+  sellFraction,
+  onSellFractionChange,
+}: Props) {
   const { verdict, results, exemptNote } = evaluate(row, isDefensive);
   const passing = verdict === "pass";
   const panelId = `criteria-${row.key}`;
+
+  const sellable = isSellable(row);
+
+  if (mode === "sell" && !sellable) {
+    return (
+      <li className="border-b border-[var(--border)] last:border-b-0">
+        <div
+          aria-disabled="true"
+          className="w-full flex items-center gap-3 px-3 py-2.5 opacity-50"
+        >
+          <span aria-hidden className="w-2 h-2 rounded-full shrink-0 border border-[var(--muted)]" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium font-mono truncate">{row.symbol}</span>
+            <span className="block text-xs text-[var(--muted)] truncate">{row.detail}</span>
+          </span>
+          <span className="text-right shrink-0">
+            <span className="block text-sm tabular font-medium">
+              ${row.value.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+            </span>
+            <span className="block text-xs text-[var(--muted)]">Not sellable</span>
+          </span>
+        </div>
+      </li>
+    );
+  }
+
+  const selected = mode === "sell" && expanded;
 
   return (
     <li className="border-b border-[var(--border)] last:border-b-0">
@@ -23,14 +63,32 @@ export default function SecurityRow({ row, isDefensive, shareOfTotal, expanded, 
         onClick={onToggle}
         aria-expanded={expanded}
         aria-controls={panelId}
-        className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-black/[0.03] transition"
+        aria-pressed={mode === "sell" ? selected : undefined}
+        className={`w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-black/[0.03] transition ${
+          selected ? "bg-[var(--accent-soft)]" : ""
+        }`}
       >
-        <span
-          aria-hidden
-          className="w-2 h-2 rounded-full shrink-0"
-          style={{ background: passing ? "var(--pass)" : "var(--fail)" }}
-        />
-        <span className="sr-only">{passing ? "Passes" : "Fails"}</span>
+        {mode === "sell" ? (
+          <span
+            aria-hidden
+            className="grid place-items-center w-4 h-4 rounded-full shrink-0 text-[9px] font-semibold text-white"
+            style={{
+              background: selected ? "var(--accent)" : "transparent",
+              border: selected ? "none" : "1.5px solid var(--border-strong)",
+            }}
+          >
+            {selected ? "✓" : ""}
+          </span>
+        ) : (
+          <>
+            <span
+              aria-hidden
+              className="w-2 h-2 rounded-full shrink-0"
+              style={{ background: passing ? "var(--pass)" : "var(--fail)" }}
+            />
+            <span className="sr-only">{passing ? "Passes" : "Fails"}</span>
+          </>
+        )}
 
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-medium font-mono truncate">{row.symbol}</span>
@@ -57,7 +115,7 @@ export default function SecurityRow({ row, isDefensive, shareOfTotal, expanded, 
         </svg>
       </button>
 
-      {expanded && (
+      {expanded && mode === "view" && (
         <div id={panelId} className="px-3 pb-3 pt-1 bg-[var(--surface-muted)]">
           {exemptNote ? (
             <p className="text-xs text-[var(--muted)] leading-relaxed px-1 py-2">{exemptNote}</p>
@@ -83,6 +141,17 @@ export default function SecurityRow({ row, isDefensive, shareOfTotal, expanded, 
               ))}
             </ul>
           )}
+        </div>
+      )}
+
+      {expanded && mode === "sell" && sellable && (
+        <div id={panelId}>
+          <SellPanel
+            sharesHeld={row.units!}
+            holdingValue={row.value}
+            fraction={sellFraction}
+            onFractionChange={onSellFractionChange}
+          />
         </div>
       )}
     </li>
