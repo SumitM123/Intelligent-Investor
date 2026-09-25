@@ -12,3 +12,9 @@ boto3
 snaptrade-python-sdk
 httpx
 yfinance>=0.2.50
+policyengine-us==1.824.2  # local no-network tax simulation; requires Python >=3.11,<3.15 (see Dockerfile.dev)
+# Pinned explicitly: policyengine-us doesn't cap this transitive dep, and spm-calculator's
+# 1.0.0 release (Sept 2026) removed spm_calculator.geoadj, breaking policyengine_us's import
+# (ModuleNotFoundError: No module named 'spm_calculator.geoadj'). 0.3.1 is the last release
+# before that break and is what policyengine-us 1.824.2 was actually built/tested against.
+spm-calculator==0.3.1
