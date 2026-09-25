@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -12,7 +13,34 @@ from routes.snapTrade import router as router_snapTrade
 from routes.bonds import router as router_bonds
 from routes.portfolio import router as router_portfolio
 from routes.taxEstimate import router as router_taxEstimate
-app = FastAPI(title="Intelligent Investor", version="1.0.0", )
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Warm up PolicyEngine's parameter-tree clone (~1.5-2s) once at process startup
+    # instead of on the first real /api/taxEstimate/estimateRetrival request. Throwaway
+    # Simulation, result discarded; the year is disposable, it just needs to trigger a
+    # real parameter-tree build.
+    from policyengine_us import Simulation
+
+    warmup_situation = {
+        "people": {"you": {
+            "employment_income": {2026: 0},
+            "long_term_capital_gains": {2026: 0},
+            "short_term_capital_gains": {2026: 0},
+        }},
+        "families": {"family": {"members": ["you"]}},
+        "marital_units": {"marital_unit": {"members": ["you"]}},
+        "tax_units": {"tax_unit": {"members": ["you"], "filing_status": {2026: "SINGLE"}}},
+        "spm_units": {"spm_unit": {"members": ["you"]}},
+        "households": {"household": {"members": ["you"], "state_code": {2026: "CA"}}},
+    }
+    Simulation(situation=warmup_situation).calculate("income_tax", 2026)
+
+    yield
+
+
+app = FastAPI(title="Intelligent Investor", version="1.0.0", lifespan=lifespan)
 
 # Add CORS middleware to allow frontend to communicate with backend
 app.add_middleware(
