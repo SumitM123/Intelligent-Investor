@@ -74,7 +74,7 @@ Backend evaluates 7 criteria against Benjamin Graham's defensive investor standa
 | 7 | P/FCF × P/Sales ≤ 50 | AlphaVantage OVERVIEW + CASH_FLOW | **No** (recomputed) |
 
 - Criteria 1–5 are cached for 3 months in `leading_stock_analysis` (JSONB). On cache hit, only criteria 6–7 are fetched live.
-- AlphaVantage free tier is 5 req/min. The backend enforces a 60+ second wait after the 5th call per request cycle to avoid rate limit errors.
+- AlphaVantage free tier is 5 req/min per key. The backend round-robins across 5 leading-stock keys (`ALPHA_VANTAGE_API_LEADING_STOCK` through `_5`) via a least-recently-used min-heap (`lead_stock_min_heap` in `frequenty_used_methods.py`) instead of sleeping out the limit.
 - Final `is_leading` boolean and per-criterion breakdown are returned to the frontend for display.
 
 **Relevant files**: `backend/routes/snapTrade.py::isLeadingStock()`, `backend/frequenty_used_methods.py::fetch_av()`, `leading_stock_analysis` table
@@ -133,6 +133,21 @@ Backend evaluates 7 criteria against Benjamin Graham's defensive investor standa
 
 **Relevant files**: `backend/bond_classifier.py`, `backend/routes/bonds.py`, `bond_profile_cache`, `fred_oas_spreads`, `bonds_table`
 
+Worked example
+  A 5% corporate, $1,000 face, maturing in 6 years, entered at 95 (i.e. $950):
+
+  coupon_annual = 0.05 × 1000                 = 50
+  YTM = [50 + (1000 − 950)/6] / [(1000+950)/2]
+      = [50 + 8.33] / 975                      = 0.0598   → 5.98%
+
+  Treasury (interpolated 6yr), say 4.20%       = 0.0420
+  spread = (0.0598 − 0.0420) × 10,000          = 178 bps
+
+  Buckets (illustrative today): AAA 60 | AA 80 | A 120 | BBB 180 | HY ...
+  178 ≤ 60? no → 178 ≤ 80? no → 178 ≤ 120? no → 178 ≤ 180? YES
+                                                ⇒ grade = BBB
+
+  Now watch the price lever: feed the same bond at par ($1,000) instead — YTM collapses to 5.00%, spread = (0.050 − 0.042)×10,000 = 80 bps, which lands in AA. Same bond, two grades, purely because of the price. That gap (BBB vs AA) is precisely the accuracy you're recovering by letting the user supply the real price.
 ---
 
 ## Data Flow Summary

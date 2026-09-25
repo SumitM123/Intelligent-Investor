@@ -113,7 +113,6 @@ CREATE TABLE IF NOT EXISTS fred_oas_spreads (
 CREATE TABLE IF NOT EXISTS bond_profile_cache (
     cusip            TEXT PRIMARY KEY,
     coupon_rate      FLOAT,          -- annual coupon rate as decimal (e.g. 0.05 = 5%)
-    payment_freq     TEXT,           -- "monthly", "quarterly", "semi-annual", "annual"
     maturity_date    DATE,
     face_value       FLOAT,          -- par value (default 1000)
     bond_type        TEXT,           -- "treasury", "corporate", "municipal", "agency", "other"
