@@ -56,6 +56,21 @@ export function criteriaFor(isDefensive: boolean): Criterion[] {
   return isDefensive ? DEFENSIVE_CRITERIA : ENTERPRISING_CRITERIA;
 }
 
+// The 7-criterion "leading common stock" screen (GET /api/snapTrade/isLeadingStock,
+// called from the "Screen a stock" search bar). Distinct from the two checklists above:
+// those score a held security for portfolio fit; this screens any ticker as a candidate
+// leading stock, independent of whether the user holds it. Order and definitions match
+// .claude/skills/leading-stock-criteria/SKILLS.md.
+export const LEADING_STOCK_CRITERIA: Criterion[] = [
+  { code: "1", name: "Adequate size", threshold: "Revenue (TTM) ≥ $1B and market cap ≥ $8B", backendKey: "adequate_size" },
+  { code: "2", name: "Strong financial condition", threshold: "Current ratio ≥ 1.75", backendKey: "current_ratio" },
+  { code: "4", name: "No earnings deficits", threshold: "Zero years of negative net income (10yr history)", backendKey: "no_earnings_deficits" },
+  { code: "5", name: "Shareholder returns", threshold: "Uninterrupted dividends 10yrs, or buybacks in ≥ 7 of last 10yrs", backendKey: "shareholder_returns" },
+  { code: "6", name: "Price to free cash flow", threshold: "P/FCF ≤ 25", backendKey: "price_to_fcf" },
+  { code: "7", name: "Combined valuation", threshold: "P/FCF × P/Sales ≤ 50", backendKey: "valuation_combined" },
+  { code: "8", name: "Earnings growth", threshold: "EPS growth ≥ 33% over 10yrs, CPI-adjusted", backendKey: "earnings_growth_10yr" },
+];
+
 export interface EvaluableRow {
   symbol: string;
   kind: "equity" | "etf" | "bond_etf" | "bond";
