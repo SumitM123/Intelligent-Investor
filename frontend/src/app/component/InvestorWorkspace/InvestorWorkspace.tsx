@@ -6,6 +6,7 @@ import BondList, { type BondEntry } from "@/app/component/BondList/BondList";
 import { PortfolioProvider } from "@/app/component/PortfolioBreakdown/PortfolioProvider";
 import BrokerageWorkspace from "@/app/component/BrokerageWorkspace/BrokerageWorkspace";
 import { useBrokerageState } from "@/app/component/BrokerageWorkspace/useBrokerageState";
+import { LEADING_STOCK_CRITERIA } from "@/app/component/BrokerageWorkspace/criteria";
 
 type CriteriaDetail = { pass?: boolean } & Record<string, unknown>;
 type CriteriaDetails = Record<string, CriteriaDetail>;
@@ -86,19 +87,47 @@ export default function InvestorWorkspace({ initialBonds, hasSnapTradeUser, isDe
               <StockSearchBar onSubmit={handleScreen} submitting={loading} />
               {error && <p className="mt-3 text-xs text-[var(--fail)]">{error}</p>}
               {result && (
-                <p className="mt-3 text-xs tabular text-[var(--muted)]">
-                  {result.symbol}:{" "}
-                  <span
-                    className={
-                      result.is_leading
-                        ? "text-[var(--pass)] font-semibold"
-                        : "text-[var(--fail)] font-semibold"
-                    }
-                  >
-                    {result.is_leading ? "Passes all 7" : "Fails the screen"}
-                  </span>{" "}
-                  · checked {result.checkedAt.toLocaleTimeString()}
-                </p>
+                <div className="mt-3">
+                  <p className="text-xs tabular text-[var(--muted)]">
+                    {result.symbol}:{" "}
+                    <span
+                      className={
+                        result.is_leading
+                          ? "text-[var(--pass)] font-semibold"
+                          : "text-[var(--fail)] font-semibold"
+                      }
+                    >
+                      {result.is_leading ? "Passes all 7" : "Fails the screen"}
+                    </span>{" "}
+                    · checked {result.checkedAt.toLocaleTimeString()}
+                  </p>
+                  {result.criteria_details && (
+                    <ul className="mt-2 rounded-lg border border-[var(--border)] divide-y divide-[var(--border)] overflow-hidden">
+                      {LEADING_STOCK_CRITERIA.map((criterion) => {
+                        const detail = result.criteria_details?.[criterion.backendKey];
+                        const pass = detail?.pass === true;
+                        return (
+                          <li key={criterion.backendKey} className="flex items-start gap-2.5 px-3 py-2">
+                            <span
+                              className="mt-0.5 grid place-items-center w-4 h-4 rounded shrink-0 text-[9px] font-semibold text-white"
+                              style={{ background: pass ? "var(--pass)" : "var(--fail)" }}
+                              aria-hidden
+                            >
+                              {pass ? "✓" : "✕"}
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-xs font-medium leading-tight">{criterion.name}</span>
+                              <span className="block text-[11px] text-[var(--muted)] tabular leading-tight mt-0.5">
+                                {criterion.threshold}
+                              </span>
+                            </span>
+                            <span className="sr-only">{pass ? "passes" : "fails"}</span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
               )}
             </div>
           )}
