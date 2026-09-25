@@ -7,22 +7,42 @@ from datetime import datetime, timezone, timedelta, date
 import httpx
 import os
 import time
+import heapq
+import threading
 from typing import Optional
 
 _AV_BASE = "https://www.alphavantage.co/query"
 _FMP_BASE = "https://financialmodelingprep.com/stable"
 _FINNHUB_BASE = "https://finnhub.io/api/v1"
 
-# TEMPORARY: per-key throttle. Tracks the monotonic timestamp of the last
-# successful request issued under each AlphaVantage API key, then blocks the
-# next request on the same key until _MIN_GAP_SECONDS have elapsed.
-_LAST_AV_CALL_BY_KEY: dict[str, float] = {}
-_MIN_GAP_SECONDS = 60.0
+_LEAD_STOCK_API_KEY_VARS = [
+    "ALPHA_VANTAGE_API_LEADING_STOCK",
+    "ALPHA_VANTAGE_API_LEADING_STOCK_2",
+    "ALPHA_VANTAGE_API_LEADING_STOCK_3",
+    "ALPHA_VANTAGE_API_LEADING_STOCK_4",
+    "ALPHA_VANTAGE_API_LEADING_STOCK_5",
+]
 
-'''
-    Instead of making a wait-time, let's create new API keys for isleading stock and then based on which key was used last time, we can iterate through the keys so that the
-    next key is used. Bypassing the wait-time needed. 
-'''
+# Min-heap of (last_used_unix_time, env_var_name) for the 5 leading-stock AlphaVantage
+# keys. Popping always returns the least-recently-used key; fetch_av re-pushes it with
+# a fresh timestamp on every call, round-robining load across all 5 keys instead of
+# hammering one and sleeping out its per-key rate limit.
+lead_stock_min_heap: list[tuple[float, str]] = [
+    (time.time(), var) for var in _LEAD_STOCK_API_KEY_VARS
+]
+heapq.heapify(lead_stock_min_heap)
+_lead_stock_heap_lock = threading.Lock()
+
+
+def _next_lead_stock_api_key_var() -> str:
+    """Pop the least-recently-used leading-stock API key env var, timestamp it now,
+    and push it back onto the heap. Locked because isLeadingStock is a sync route
+    that Starlette runs in a thread pool -- concurrent screens must not corrupt the heap."""
+    with _lead_stock_heap_lock:
+        _, key_var = heapq.heappop(lead_stock_min_heap)
+        heapq.heappush(lead_stock_min_heap, (time.time(), key_var))
+        return key_var
+
 
 def assert_user_exists(session, user_id) -> None:
     '''
@@ -38,22 +58,14 @@ def assert_user_exists(session, user_id) -> None:
 
 
 def fetch_av(function: str, symbol: Optional[str] = None, **kwargs) -> dict:
-    api_key = os.environ["ALPHA_VANTAGE_API_LEADING_STOCK"]
+    api_key_var = _next_lead_stock_api_key_var()
+    api_key = os.environ[api_key_var]
     params = {"function": function, "apikey": api_key}
     if symbol:
         params["symbol"] = symbol
     params.update(kwargs)
 
-    last = _LAST_AV_CALL_BY_KEY.get(api_key)
-    if last is not None:
-        gap = time.monotonic() - last
-        if gap < _MIN_GAP_SECONDS:
-            wait = _MIN_GAP_SECONDS - gap
-            print(f"[AV THROTTLE] waiting {wait:.1f}s before {function} (key={api_key[:6]}…)", flush=True)
-            time.sleep(wait)
-    _LAST_AV_CALL_BY_KEY[api_key] = time.monotonic()
-
-    print(f"[AV REQ] function={function} symbol={symbol} kwargs={kwargs}", flush=True)
+    print(f"[AV REQ] function={function} symbol={symbol} kwargs={kwargs} key_var={api_key_var}", flush=True)
     try:
         resp = httpx.get(_AV_BASE, params=params, timeout=20)
         resp.raise_for_status()
