@@ -8,9 +8,14 @@ from frequenty_used_methods import fetch_finnhub, _parse_snaptrade_datetime
 from snapTradeInitialization import snapTrade
 
 '''
-    FIFO cost-basis reconstruction + federal/state capital-gains tax estimation for the
-    "Actual Retrieved" feature (backend/routes/taxEstimate.py). Traditional brokerage
-    accounts only for now -- see brainstorming actual retrived.txt for the full spec.
+    FIFO cost-basis reconstruction for the "Actual Retrieved" feature
+    (backend/routes/taxEstimate.py). Traditional brokerage accounts only for now -- see
+    brainstorming actual retrived.txt for the full spec. Federal/state/NIIT tax
+    computation itself is delegated to policyengine-us (see compute_policyengine_tax)
+    rather than hand-rolled here -- verified against PolicyEngine's own source to
+    correctly apply IRC 1222(11) short/long-term netting, the IRC 1211(b) $3,000/$1,500
+    annual capital-loss cap, and NIIT's investment-income base, all automatically, from
+    raw (possibly negative) short_term_capital_gains/long_term_capital_gains inputs.
 '''
 
 # Which tax types apply to a given account type, and which user_profile columns each
@@ -184,89 +189,187 @@ def consume_fifo_lots(remaining_lots: list[dict], shares_to_sell: float, current
     }
 
 
-def net_capital_gains(short_term_total: float, long_term_total: float) -> dict:
-    """Nets short-term and long-term totals across all securities in the request.
+# This app's user_profile.filing_status values (lowercase_with_underscores, enforced by
+# the user_profile_filing_status_check CHECK constraint in schema.sql) mapped to
+# PolicyEngine's TaxUnit filing_status enum. SURVIVING_SPOUSE is intentionally
+# unreachable -- user_profile has no such option.
+_FILING_STATUS_TO_POLICYENGINE = {
+    "single": "SINGLE",
+    "married_filing_jointly": "JOINT",
+    "married_filing_separately": "SEPARATE",
+    "head_of_household": "HEAD_OF_HOUSEHOLD",
+}
 
-    A net loss (net_value < 0) stops here -- no bracket tax is computed for it.
-    Otherwise, if exactly one bucket is negative, it offsets the positive bucket down
-    to net_value and only the originally-positive bucket's type is taxed.
-    """
-    net_value = short_term_total + long_term_total
-    if net_value < 0:
-        return {
-            "is_net_loss": True,
-            "net_value": net_value,
-            "taxable_short_term": 0.0,
-            "taxable_long_term": 0.0,
-        }
 
-    if short_term_total < 0 <= long_term_total:
-        taxable_short_term, taxable_long_term = 0.0, net_value
-    elif long_term_total < 0 <= short_term_total:
-        taxable_short_term, taxable_long_term = net_value, 0.0
-    else:
-        taxable_short_term, taxable_long_term = short_term_total, long_term_total
+def map_filing_status_to_policyengine(filing_status: str) -> str:
+    mapped = _FILING_STATUS_TO_POLICYENGINE.get(filing_status)
+    if mapped is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unmapped filing_status for PolicyEngine: {filing_status}",
+        )
+    return mapped
 
+
+def _build_policyengine_situation(
+    pe_filing_status: str, annual_income: float, home_state: str,
+    short_term_capital_gains: float, long_term_capital_gains: float, tax_year: int,
+) -> dict:
     return {
-        "is_net_loss": False,
-        "net_value": net_value,
-        "taxable_short_term": taxable_short_term,
-        "taxable_long_term": taxable_long_term,
+        "people": {"you": {
+            "employment_income": {tax_year: annual_income},
+            "long_term_capital_gains": {tax_year: long_term_capital_gains},
+            "short_term_capital_gains": {tax_year: short_term_capital_gains},
+        }},
+        "families": {"family": {"members": ["you"]}},
+        "marital_units": {"marital_unit": {"members": ["you"]}},
+        "tax_units": {"tax_unit": {"members": ["you"], "filing_status": {tax_year: pe_filing_status}}},
+        "spm_units": {"spm_unit": {"members": ["you"]}},
+        "households": {"household": {"members": ["you"], "state_code": {tax_year: home_state}}},
     }
 
 
-def calculate_bracket_tax(brackets: list[dict], stacking_base: float, taxable_amount: float) -> float:
-    """Incremental tax owed on [stacking_base, stacking_base + taxable_amount] -- the
-    marginal tax on top of income already earned, not tax on the whole stack from $0."""
-    if taxable_amount <= 0:
-        return 0.0
+def compute_policyengine_tax(
+    filing_status: str,
+    annual_income: float,
+    home_state: str,
+    short_term_capital_gains: float,
+    long_term_capital_gains: float,
+    tax_year: int,
+) -> dict:
+    """Single PolicyEngine Simulation call producing federal income tax, state income
+    tax, and NIIT for one household. Inputs are RAW/signed (may be negative) -- do NOT
+    pre-offset short-term against long-term before calling this; PolicyEngine's own
+    net_capital_gain / loss_limited_net_capital_gains variables (IRC 1222(11), 1211(b))
+    do that internally, correctly, per filing status -- verified against source."""
+    from policyengine_us import Simulation
 
-    range_start = stacking_base
-    range_end = stacking_base + taxable_amount
-    tax = 0.0
-    for bracket in brackets:
-        lower = float(bracket["lower_bound"])
-        upper = float(bracket["upper_bound"]) if bracket["upper_bound"] is not None else float("inf")
-        overlap = min(range_end, upper) - max(range_start, lower)
-        if overlap > 0:
-            tax += overlap * float(bracket["rate"])
-    return tax
+    pe_filing_status = map_filing_status_to_policyengine(filing_status)
+    situation = _build_policyengine_situation(
+        pe_filing_status, annual_income, home_state,
+        short_term_capital_gains, long_term_capital_gains, tax_year,
+    )
+    sim = Simulation(situation=situation)
+    federal_tax = float(sim.calculate("income_tax", tax_year)[0])
+    niit = float(sim.calculate("net_investment_income_tax", tax_year)[0])
+    state_tax = float(sim.calculate("state_income_tax", tax_year)[0])
+    return {
+        "federal_tax": federal_tax,
+        "state_tax": state_tax,
+        "niit": niit,
+        "total_tax": federal_tax + state_tax + niit,
+    }
 
 
-def get_tax_brackets(session, jurisdiction: str, tax_type: str, filing_status: str, tax_year: int) -> list[dict]:
-    """Reads a bracket table from the tax_brackets reference table. An empty result is
-    a server-side data bug (an unseeded combination), never silently treated as $0 --
-    no-income-tax jurisdictions are seeded with an explicit 0%-rate row."""
-    rows = session.execute(
+def get_capital_loss_limit(filing_status: str, tax_year: int) -> float:
+    """Real IRC 1211(b) annual capital-loss deduction cap ($3,000 / $1,500 MFS), read
+    from PolicyEngine's own parameter tree -- single source of truth, tracks
+    PolicyEngine's parameter if it ever changes rather than hardcoding it. Access path
+    confirmed via a REPL smoke test against the installed package."""
+    from policyengine_us import Simulation
+
+    pe_filing_status = map_filing_status_to_policyengine(filing_status)
+    situation = _build_policyengine_situation(pe_filing_status, 0.0, "CA", 0.0, 0.0, tax_year)
+    sim = Simulation(situation=situation)
+    period = f"{tax_year}-01-01"
+    loss_limit = sim.tax_benefit_system.parameters.gov.irs.capital_gains.loss_limit(period)
+    return float(loss_limit[pe_filing_status])
+
+
+def get_opening_carryover_balance(session, user_id, tax_year: int) -> tuple[float, float]:
+    """Opening (short_term, long_term) loss balance for tax_year, both <= 0. If a row
+    already exists for (user_id, tax_year), that IS the opening balance as-is (a second
+    call within the same year reads back what an earlier call this year already wrote --
+    see the "Known open question" in the implementation plan). Otherwise rolls forward
+    from the most recent PRIOR year's row (any number of years back, not just
+    tax_year - 1 -- IRC 1212(b): capital losses carry forward indefinitely, no
+    expiration). No row at all (first-ever use) -> (0.0, 0.0)."""
+    row = session.execute(
         text(
             """
-            SELECT lower_bound, upper_bound, rate
-            FROM tax_brackets
-            WHERE jurisdiction = :jurisdiction
-              AND tax_type = :tax_type
-              AND filing_status = :filing_status
-              AND tax_year = :tax_year
-            ORDER BY bracket_order
+            SELECT net_short_term_capital_loss, net_long_term_capital_loss
+            FROM net_capital_loss
+            WHERE user_id = :user_id AND tax_year = :tax_year
             """
         ),
-        {
-            "jurisdiction": jurisdiction,
-            "tax_type": tax_type,
-            "filing_status": filing_status,
-            "tax_year": tax_year,
-        },
-    ).fetchall()
+        {"user_id": user_id, "tax_year": tax_year},
+    ).first()
+    if row is not None:
+        return float(row[0]), float(row[1])
 
-    if not rows:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=(
-                f"No tax bracket data seeded for jurisdiction={jurisdiction} "
-                f"tax_type={tax_type} filing_status={filing_status} tax_year={tax_year}"
-            ),
-        )
+    prior_row = session.execute(
+        text(
+            """
+            SELECT net_short_term_capital_loss, net_long_term_capital_loss
+            FROM net_capital_loss
+            WHERE user_id = :user_id AND tax_year < :tax_year
+            ORDER BY tax_year DESC
+            LIMIT 1
+            """
+        ),
+        {"user_id": user_id, "tax_year": tax_year},
+    ).first()
+    if prior_row is not None:
+        return float(prior_row[0]), float(prior_row[1])
 
-    return [{"lower_bound": r[0], "upper_bound": r[1], "rate": r[2]} for r in rows]
+    return 0.0, 0.0
+
+
+def store_carryover_balance(
+    session, user_id, tax_year: int, filing_status: str,
+    new_net_st: float, new_net_lt: float,
+) -> dict:
+    """Bookkeeping only -- determines what carries into next year's opening balance.
+    Never affects this year's actual tax (compute_policyengine_tax already handled that
+    from the raw new_net_st/new_net_lt directly). Short-term losses absorb this year's
+    $3,000/$1,500 usable-loss cap first, long-term second -- but opposite-signed buckets
+    must be netted against each other FIRST, or a positive bucket can survive the
+    depletion step untouched and violate the "always <= 0" invariant (worked example:
+    st=-5000, lt=+1000 -> net=-4000 -> netting first gives eff_st=-4000, eff_lt=0 ->
+    depleting the $3,000 cap from eff_st gives a valid stored (-1000, 0))."""
+    net_capital = new_net_st + new_net_lt
+
+    if net_capital >= 0:
+        st_new, lt_new, mini, leftover = 0.0, 0.0, 0.0, 0.0
+    else:
+        if new_net_st < 0 <= new_net_lt:
+            eff_st, eff_lt = new_net_st + new_net_lt, 0.0
+        elif new_net_lt < 0 <= new_net_st:
+            eff_st, eff_lt = 0.0, new_net_lt + new_net_st
+        else:
+            eff_st, eff_lt = new_net_st, new_net_lt  # both already <= 0
+
+        cap = get_capital_loss_limit(filing_status, tax_year)
+        mini = max(net_capital, -cap)        # usable this year, <= 0
+        leftover = net_capital - mini        # carries forward, <= 0
+        if leftover == 0.0:
+            st_new, lt_new = 0.0, 0.0
+        else:
+            mini_mag = -mini
+            st_used = min(mini_mag, -eff_st)
+            st_new = eff_st + st_used
+            lt_new = eff_lt + (mini_mag - st_used)
+
+    session.execute(
+        text(
+            """
+            INSERT INTO net_capital_loss (user_id, tax_year, net_short_term_capital_loss, net_long_term_capital_loss, updated_at)
+            VALUES (:user_id, :tax_year, :st, :lt, NOW())
+            ON CONFLICT (user_id, tax_year) DO UPDATE
+                SET net_short_term_capital_loss = EXCLUDED.net_short_term_capital_loss,
+                    net_long_term_capital_loss = EXCLUDED.net_long_term_capital_loss,
+                    updated_at = NOW()
+            """
+        ),
+        {"user_id": user_id, "tax_year": tax_year, "st": st_new, "lt": lt_new},
+    )
+
+    return {
+        "deductible_against_income_this_year": mini,
+        "carryover_to_next_year": leftover,
+        "stored_short_term": st_new,
+        "stored_long_term": lt_new,
+    }
 
 
 def get_current_price(symbol: str) -> float:
