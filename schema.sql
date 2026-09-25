@@ -178,13 +178,10 @@ BEGIN
     END IF;
 END$$;
 
--- Federal + state tax bracket reference data for the "Actual Retrieved" feature
--- (backend/tax_calculator.py). One row per bracket segment. jurisdiction is 'FEDERAL'
--- or a 2-letter state code (same format as user_profile.home_state). No-income-tax
--- states (e.g. FL, TX, WA's wage income) are seeded with one explicit 0%-rate row per
--- filing_status/tax_year rather than left absent, so a genuinely missing/unseeded
--- combination (a data bug) is distinguishable from "this state has no income tax"
--- (an intentional zero) at query time. Seed data lives in tax_brackets_seed.sql, not here.
+-- Federal + state tax bracket reference data -- NO LONGER QUERIED as of the
+-- PolicyEngine migration (backend/tax_calculator.py now computes federal/state/NIIT
+-- tax via policyengine-us instead of hand-rolled brackets). Left in place, unqueried,
+-- as a zero-risk rollback safety net; tax_brackets_seed.sql is likewise untouched.
 CREATE TABLE IF NOT EXISTS tax_brackets (
     jurisdiction  TEXT     NOT NULL,
     tax_type      TEXT     NOT NULL CHECK (tax_type IN ('ordinary_income', 'long_term_capital_gains', 'state_income')),
@@ -198,6 +195,21 @@ CREATE TABLE IF NOT EXISTS tax_brackets (
     rate          NUMERIC(6,5)   NOT NULL CHECK (rate BETWEEN 0 AND 1),
     PRIMARY KEY (jurisdiction, tax_type, filing_status, tax_year, bracket_order),
     CHECK (upper_bound IS NULL OR upper_bound > lower_bound)
+);
+
+-- Year-scoped capital-loss carryover balances for the "Actual Retrieved" tax-estimate
+-- feature. One row per (user_id, tax_year); both columns are always <= 0 -- this table
+-- only ever holds *unused loss*, never a positive gain balance. A missing row for a
+-- given (user_id, tax_year) means "roll forward from the most recent prior year's row,
+-- or (0,0) if none" -- callers must not assume a missing row means (0,0) outright (see
+-- get_opening_carryover_balance in backend/tax_calculator.py).
+CREATE TABLE IF NOT EXISTS net_capital_loss (
+    user_id                     UUID     NOT NULL REFERENCES users_id(user_id) ON DELETE CASCADE,
+    tax_year                    SMALLINT NOT NULL,
+    net_short_term_capital_loss NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (net_short_term_capital_loss <= 0),
+    net_long_term_capital_loss  NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (net_long_term_capital_loss <= 0),
+    updated_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, tax_year)
 );
 
 COMMIT;
