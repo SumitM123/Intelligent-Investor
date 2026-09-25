@@ -14,9 +14,9 @@ from tax_calculator import (
     ACCOUNT_TYPE_TAX_REQUIREMENTS,
     build_fifo_lots,
     consume_fifo_lots,
-    net_capital_gains,
-    calculate_bracket_tax,
-    get_tax_brackets,
+    compute_policyengine_tax,
+    get_opening_carryover_balance,
+    store_carryover_balance,
     get_current_price,
 )
 
@@ -131,63 +131,48 @@ def estimateRetrieval(
             "lots_consumed": result["lots_consumed"],
         })
 
-    netting = net_capital_gains(short_term_total, long_term_total)
-
-    if netting["is_net_loss"]:
-        net_value = netting["net_value"]
-        return {
-            "is_net_loss": True,
-            "net_value": net_value,
-            "total_tax": net_value,
-            "federal_tax": 0.0,
-            "state_tax": 0.0,
-            "deductible_against_income_this_year": max(net_value, -3000.0),
-            "carryover_to_next_year": min(net_value + 3000.0, 0.0),
-            "breakdown": breakdown,
-        }
-
     tax_year = today.year
 
     with SessionLocal() as session:
         try:
-            federal_ordinary_brackets = get_tax_brackets(
-                session, "FEDERAL", "ordinary_income", filing_status, tax_year
+            opening_st, opening_lt = get_opening_carryover_balance(session, user_id, tax_year)
+
+            new_net_st = opening_st + short_term_total
+            new_net_lt = opening_lt + long_term_total
+
+            tax_result = compute_policyengine_tax(
+                filing_status=filing_status,
+                annual_income=annual_income,
+                home_state=home_state,
+                short_term_capital_gains=new_net_st,
+                long_term_capital_gains=new_net_lt,
+                tax_year=tax_year,
             )
-            federal_ltcg_brackets = get_tax_brackets(
-                session, "FEDERAL", "long_term_capital_gains", filing_status, tax_year
+
+            carryover_result = store_carryover_balance(
+                session, user_id, tax_year, filing_status, new_net_st, new_net_lt,
             )
-            state_brackets = get_tax_brackets(session, home_state, "state_income", filing_status, tax_year)
+            session.commit()
         except HTTPException:
             session.rollback()
             raise
+        except Exception as exc:
+            session.rollback()
+            raise HTTPException(status_code=500, detail=f"Failed to compute tax estimate: {exc}")
 
-    taxable_short_term = netting["taxable_short_term"]
-    taxable_long_term = netting["taxable_long_term"]
-
-    federal_short_term_tax = calculate_bracket_tax(federal_ordinary_brackets, annual_income, taxable_short_term)
-    federal_long_term_tax = calculate_bracket_tax(
-        federal_ltcg_brackets, annual_income + taxable_short_term, taxable_long_term
-    )
-    federal_tax = federal_short_term_tax + federal_long_term_tax
-
-    # v1 simplification: state tax treats short-term + long-term as one combined
-    # ordinary-income bucket (most states have no separate LTCG rate). Known gap:
-    # Washington's separate capital-gains excise tax isn't modeled.
-    state_tax = calculate_bracket_tax(state_brackets, annual_income, taxable_short_term + taxable_long_term)
-
-    # NIIT (3.8% surtax) intentionally out of scope for v1 -- see brainstorming doc.
-    niit = 0.0
+    net_value = new_net_st + new_net_lt
 
     return {
-        "net_value": netting["net_value"],
-        "short_term_gain": taxable_short_term,
-        "long_term_gain": taxable_long_term,
-        "federal_short_term_tax": federal_short_term_tax,
-        "federal_long_term_tax": federal_long_term_tax,
-        "federal_tax": federal_tax,
-        "state_tax": state_tax,
-        "total_tax": federal_tax + state_tax,
-        "niit": niit,
+        "net_value": net_value,
+        "is_net_loss": net_value < 0,
+        "short_term_gain": short_term_total,
+        "long_term_gain": long_term_total,
+        "federal_tax": tax_result["federal_tax"],
+        "state_tax": tax_result["state_tax"],
+        "niit": tax_result["niit"],
+        "total_tax": tax_result["total_tax"],
         "tax_year": tax_year,
+        "deductible_against_income_this_year": carryover_result["deductible_against_income_this_year"],
+        "carryover_to_next_year": carryover_result["carryover_to_next_year"],
         "breakdown": breakdown,
     }
