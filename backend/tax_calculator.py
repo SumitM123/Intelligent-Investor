@@ -8,26 +8,54 @@ from frequenty_used_methods import fetch_finnhub, _parse_snaptrade_datetime
 from snapTradeInitialization import snapTrade
 
 '''
-    FIFO cost-basis reconstruction for the "Actual Retrieved" feature
-    (backend/routes/taxEstimate.py). Traditional brokerage accounts only for now -- see
-    brainstorming actual retrived.txt for the full spec. Federal/state/NIIT tax
-    computation itself is delegated to policyengine-us (see compute_policyengine_tax)
-    rather than hand-rolled here -- verified against PolicyEngine's own source to
-    correctly apply IRC 1222(11) short/long-term netting, the IRC 1211(b) $3,000/$1,500
-    annual capital-loss cap, and NIIT's investment-income base, all automatically, from
-    raw (possibly negative) short_term_capital_gains/long_term_capital_gains inputs.
+    Tax-computation logic for the "Actual Retrieved" feature (backend/routes/taxEstimate.py)
+    -- see brainstorming actual retrived.txt for the full spec. Two account types:
+
+    - traditional_brokerage: FIFO cost-basis reconstruction from buy/sell activity, then
+      federal/state/NIIT tax via policyengine-us (compute_policyengine_tax) -- verified
+      against PolicyEngine's own source to correctly apply IRC 1222(11) short/long-term
+      netting, the IRC 1211(b) $3,000/$1,500 annual capital-loss cap, and NIIT's
+      investment-income base, all automatically, from raw (possibly negative)
+      short_term_capital_gains/long_term_capital_gains inputs.
+    - roth_401k: a single withdrawal amount split proportionally into contribution/profit
+      portions, taxed via compute_roth_401k_withdrawal (also policyengine-us-backed, via
+      taxable_401k_distributions). No FIFO lots, no capital gains, no carryover.
 '''
 
 # Which tax types apply to a given account type, and which user_profile columns each
 # one needs. Only traditional_brokerage is wired up in v1; other account types (401k,
 # Roth IRA, etc.) extend this dict later without touching the route.
+#
+# roth_401k's tuples list only what actually lives in user_profile -- the account's
+# tenure/5-year-rule status and the withdrawal amount are per-request form data, not
+# profile columns, so they're not listed here (see estimateRothWithdrawal).
 ACCOUNT_TYPE_TAX_REQUIREMENTS: dict[str, list[tuple[str, list[str]]]] = {
     "traditional_brokerage": [
         ("short_term_capital_gains", ["filing_status", "annual_income"]),
         ("long_term_capital_gains", ["filing_status", "annual_income"]),
         ("state_tax", ["filing_status", "annual_income", "home_state"]),
     ],
+    "roth_401k": [
+        ("ordinary_income_tax_on_earnings", ["filing_status", "annual_income", "date_of_birth"]),
+        ("state_tax_on_earnings", ["filing_status", "annual_income", "home_state", "date_of_birth"]),
+        ("early_withdrawal_penalty", ["date_of_birth"]),
+    ],
 }
+
+
+def get_required_profile_columns(account_type: str) -> list[str]:
+    """Flattens ACCOUNT_TYPE_TAX_REQUIREMENTS[account_type] into the unique user_profile
+    columns a request for that account type needs, in first-seen order -- lets a route
+    build its SELECT from the dict instead of hardcoding a column list. Used by the Roth
+    401(k) route; traditional_brokerage's existing hardcoded SELECT is untouched."""
+    columns: list[str] = []
+    seen: set[str] = set()
+    for _tax_type, required_columns in ACCOUNT_TYPE_TAX_REQUIREMENTS[account_type]:
+        for column in required_columns:
+            if column not in seen:
+                seen.add(column)
+                columns.append(column)
+    return columns
 
 
 def fetch_buy_sell_activities(
@@ -237,27 +265,206 @@ def compute_policyengine_tax(
     long_term_capital_gains: float,
     tax_year: int,
 ) -> dict:
-    """Single PolicyEngine Simulation call producing federal income tax, state income
-    tax, and NIIT for one household. Inputs are RAW/signed (may be negative) -- do NOT
-    pre-offset short-term against long-term before calling this; PolicyEngine's own
-    net_capital_gain / loss_limited_net_capital_gains variables (IRC 1222(11), 1211(b))
-    do that internally, correctly, per filing status -- verified against source."""
+    """Two PolicyEngine Simulation calls -- one with the household's real income AND
+    capital gains, one with the same income but gains zeroed out -- diffed to isolate
+    the MARGINAL federal/state/NIIT tax actually attributable to the capital gains.
+    A single sim.calculate("income_tax", ...) call returns the household's TOTAL tax
+    liability for the year (wage income included), not the incremental tax caused by
+    the gains -- diffing against a no-gains baseline is the only way to pull that back
+    out of PolicyEngine. Confirmed against a live case: $25,000 salary + a $1.37 gain
+    was reporting $890 "federal_tax" (the tax on the $25,000 salary alone) before this
+    fix; diffed, it correctly reports the near-zero marginal tax on $1.37.
+
+    Inputs are RAW/signed (may be negative) -- do NOT pre-offset short-term against
+    long-term before calling this; PolicyEngine's own net_capital_gain /
+    loss_limited_net_capital_gains variables (IRC 1222(11), 1211(b)) do that internally,
+    correctly, per filing status -- verified against source."""
     from policyengine_us import Simulation
 
     pe_filing_status = map_filing_status_to_policyengine(filing_status)
-    situation = _build_policyengine_situation(
+
+    with_gains_situation = _build_policyengine_situation(
         pe_filing_status, annual_income, home_state,
         short_term_capital_gains, long_term_capital_gains, tax_year,
     )
-    sim = Simulation(situation=situation)
-    federal_tax = float(sim.calculate("income_tax", tax_year)[0])
-    niit = float(sim.calculate("net_investment_income_tax", tax_year)[0])
-    state_tax = float(sim.calculate("state_income_tax", tax_year)[0])
+    baseline_situation = _build_policyengine_situation(
+        pe_filing_status, annual_income, home_state, 0.0, 0.0, tax_year,
+    )
+    with_gains_sim = Simulation(situation=with_gains_situation)
+    baseline_sim = Simulation(situation=baseline_situation)
+
+    federal_tax = (
+        float(with_gains_sim.calculate("income_tax", tax_year)[0])
+        - float(baseline_sim.calculate("income_tax", tax_year)[0])
+    )
+    niit = (
+        float(with_gains_sim.calculate("net_investment_income_tax", tax_year)[0])
+        - float(baseline_sim.calculate("net_investment_income_tax", tax_year)[0])
+    )
+    state_tax = (
+        float(with_gains_sim.calculate("state_income_tax", tax_year)[0])
+        - float(baseline_sim.calculate("state_income_tax", tax_year)[0])
+    )
     return {
         "federal_tax": federal_tax,
         "state_tax": state_tax,
         "niit": niit,
         "total_tax": federal_tax + state_tax + niit,
+    }
+
+
+def get_live_account_balance(snapTrade_id: str, snaptrade_usersecret_id: str, account_id: str) -> float:
+    """Live USD total balance for one account, via the same
+    account_information.list_user_accounts call + balance.total.amount extraction that
+    backend/routes/snapTrade.py's getAllAccountsFromConnection already uses. Deliberately
+    uncached -- balances change by the minute and this feeds a tax computation, so a
+    stale read is worse than a slower one."""
+    all_accounts = snapTrade.account_information.list_user_accounts(
+        user_id=snapTrade_id,
+        user_secret=snaptrade_usersecret_id,
+    ).body
+    if not isinstance(all_accounts, list):
+        all_accounts = []
+
+    for account in all_accounts:
+        if not isinstance(account, dict) or account.get("id") != account_id:
+            continue
+        balance = account.get("balance") or {}
+        total = balance.get("total") or {}
+        if total.get("currency") != "USD":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Account {account_id} has no USD balance",
+            )
+        amount = total.get("amount")
+        if amount is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Account {account_id} has no balance available",
+            )
+        return float(amount)
+
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"Account {account_id} was not found",
+    )
+
+
+def _build_roth_401k_situation(
+    pe_filing_status: str, annual_income: float, home_state: str,
+    taxable_earnings: float, tax_year: int,
+) -> dict:
+    """Sibling to _build_policyengine_situation, kept separate rather than overloading
+    it -- this situation carries taxable_401k_distributions (the taxable portion of a
+    non-qualified Roth 401(k) withdrawal) instead of capital-gains fields, and the two
+    shouldn't cross-contaminate. taxable_401k_distributions is verified (REPL smoke test
+    against the installed policyengine-us) to add ordinary income at the correct marginal
+    rate and to leave net_investment_income_tax unchanged -- correct, since IRC 1411
+    excludes qualified retirement plan distributions from net investment income."""
+    return {
+        "people": {"you": {
+            "employment_income": {tax_year: annual_income},
+            "taxable_401k_distributions": {tax_year: taxable_earnings},
+        }},
+        "families": {"family": {"members": ["you"]}},
+        "marital_units": {"marital_unit": {"members": ["you"]}},
+        "tax_units": {"tax_unit": {"members": ["you"], "filing_status": {tax_year: pe_filing_status}}},
+        "spm_units": {"spm_unit": {"members": ["you"]}},
+        "households": {"household": {"members": ["you"], "state_code": {tax_year: home_state}}},
+    }
+
+
+def compute_roth_401k_withdrawal(
+    filing_status: str,
+    annual_income: float,
+    home_state: str,
+    date_of_birth: date,
+    withdrawal_amount: float,
+    total_contributions: float,
+    live_balance: float,
+    meets_five_year_rule: bool,
+    tax_year: int,
+) -> dict:
+    """Roth 401(k) non-security withdrawal: no FIFO lots, no capital gains, no
+    net_capital_loss carryover involvement -- the withdrawal amount is split into a
+    contribution portion (always tax/penalty-free, already-taxed basis) and a profit
+    portion (taxed/penalized per the matrix below), by proportion, not by dollar bucket.
+
+    meets_59_5 (from date_of_birth) and meets_five_year_rule (user-attested, not stored)
+    together determine a qualified distribution (IRS: both 5-year period AND age 59.5+
+    required) -- fully tax- and penalty-free. Every other combination taxes the profit
+    portion as ordinary income; the 10% early-withdrawal penalty additionally applies
+    whenever meets_59_5 is False, regardless of the 5-year rule (rule-of-55 and other
+    exceptions are explicitly not modeled -- see the implementation plan)."""
+    if live_balance <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Account has no positive balance to withdraw against",
+        )
+
+    from dateutil.relativedelta import relativedelta
+
+    age = relativedelta(date.today(), date_of_birth)
+    meets_59_5 = (age.years, age.months) >= (59, 6)
+
+    # Account at a loss (contributions >= balance): the entire withdrawal is basis: no
+    # gain, nothing to tax or penalize, regardless of age/5-year status.
+    contribution_proportion = min(1.0, total_contributions / live_balance)
+    profit_proportion = 1.0 - contribution_proportion
+
+    contribution_amount_withdrawn = withdrawal_amount * contribution_proportion
+    profit_amount_withdrawn = withdrawal_amount * profit_proportion
+
+    is_qualified = meets_59_5 and meets_five_year_rule
+
+    if is_qualified or profit_amount_withdrawn <= 0:
+        federal_tax = 0.0
+        state_tax = 0.0
+    else:
+        from policyengine_us import Simulation
+
+        pe_filing_status = map_filing_status_to_policyengine(filing_status)
+
+        with_earnings_situation = _build_roth_401k_situation(
+            pe_filing_status, annual_income, home_state, profit_amount_withdrawn, tax_year,
+        )
+        baseline_situation = _build_roth_401k_situation(
+            pe_filing_status, annual_income, home_state, 0.0, tax_year,
+        )
+        with_earnings_sim = Simulation(situation=with_earnings_situation)
+        baseline_sim = Simulation(situation=baseline_situation)
+
+        federal_tax = (
+            float(with_earnings_sim.calculate("income_tax", tax_year)[0])
+            - float(baseline_sim.calculate("income_tax", tax_year)[0])
+        )
+        state_tax = (
+            float(with_earnings_sim.calculate("state_income_tax", tax_year)[0])
+            - float(baseline_sim.calculate("state_income_tax", tax_year)[0])
+        )
+
+    early_withdrawal_penalty = 0.0 if (is_qualified or meets_59_5) else profit_amount_withdrawn * 0.10
+
+    total_tax = federal_tax + state_tax
+    total_taxes_and_penalties = total_tax + early_withdrawal_penalty
+
+    return {
+        "account_type": "roth_401k",
+        "withdrawal_amount": withdrawal_amount,
+        "contribution_proportion": contribution_proportion,
+        "profit_proportion": profit_proportion,
+        "contribution_amount_withdrawn": contribution_amount_withdrawn,
+        "profit_amount_withdrawn": profit_amount_withdrawn,
+        "meets_age_59_5": meets_59_5,
+        "meets_five_year_rule": meets_five_year_rule,
+        "is_qualified_distribution": is_qualified,
+        "federal_tax": federal_tax,
+        "state_tax": state_tax,
+        "total_tax": total_tax,
+        "early_withdrawal_penalty": early_withdrawal_penalty,
+        "total_taxes_and_penalties": total_taxes_and_penalties,
+        "net_withdrawal_after_taxes_and_penalties": withdrawal_amount - total_taxes_and_penalties,
+        "tax_year": tax_year,
     }
 
 
