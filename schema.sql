@@ -178,6 +178,11 @@ BEGIN
     END IF;
 END$$;
 
+-- date_of_birth: added for the Roth 401(k) withdrawal tax-estimate feature (age drives
+-- the 59.5 early-withdrawal threshold). Nullable -- existing users won't have it set;
+-- routes that need it 400 with a clear message rather than crashing on a NULL.
+ALTER TABLE user_profile ADD COLUMN IF NOT EXISTS date_of_birth DATE;
+
 -- Federal + state tax bracket reference data -- NO LONGER QUERIED as of the
 -- PolicyEngine migration (backend/tax_calculator.py now computes federal/state/NIIT
 -- tax via policyengine-us instead of hand-rolled brackets). Left in place, unqueried,
