@@ -7,6 +7,7 @@ from fastapi import Body
 from sqlalchemy import text
 from typing import Annotated
 from uuid import UUID
+from datetime import date
 import json
 import boto3
 from frequenty_used_methods import assert_user_exists
@@ -222,7 +223,7 @@ _PROFILE_COLUMNS = """
     user_id, monthly_investment, annual_income, stock_pct, enterprising_pct,
     is_married, home_state, is_employed, has_401k, has_401k_match,
     match_rate_pct, match_limit_pct, k401_investment_types, filing_status,
-    created_at, updated_at
+    date_of_birth, created_at, updated_at
 """
 
 
@@ -247,6 +248,7 @@ def _row_to_profile(row) -> dict:
         "match_limit_pct": num(row.match_limit_pct),
         "k401_investment_types": row.k401_investment_types,
         "filing_status": row.filing_status,
+        "date_of_birth": row.date_of_birth.isoformat() if row.date_of_birth else None,
         "created_at": row.created_at.isoformat(),
         "updated_at": row.updated_at.isoformat(),
     }
@@ -266,6 +268,7 @@ def _validate_profile(
     match_limit_pct: float | None,
     k401_investment_types: list[str],
     filing_status: str | None,
+    date_of_birth: date | None,
 ) -> dict:
     '''
         Rejects rather than clamps: silently coercing an out-of-band value would hide a
@@ -291,6 +294,11 @@ def _validate_profile(
     resolved_filing_status = filing_status or ("married_filing_jointly" if is_married else "single")
     if resolved_filing_status not in _FILING_STATUSES:
         raise HTTPException(status_code=400, detail=f"Unknown filing_status: {filing_status}")
+
+    # Added for the Roth 401(k) withdrawal tax-estimate feature (age drives the 59.5
+    # early-withdrawal threshold). Optional -- most of this form's fields don't touch it.
+    if date_of_birth is not None and date_of_birth >= date.today():
+        raise HTTPException(status_code=400, detail="date_of_birth must be in the past")
 
     types = sorted(set(k401_investment_types))
     unknown = [t for t in types if t not in _K401_TYPES]
@@ -339,6 +347,7 @@ def _validate_profile(
         "match_limit_pct": match_limit_pct,
         "k401_investment_types": json.dumps(types),
         "filing_status": resolved_filing_status,
+        "date_of_birth": date_of_birth,
     }
 
 
@@ -375,12 +384,13 @@ def create_user_profile(
     match_limit_pct: Annotated[float | None, Form()] = None,
     k401_investment_types: Annotated[list[str], Form()] = [],
     filing_status: Annotated[str | None, Form()] = None,
+    date_of_birth: Annotated[date | None, Form()] = None,
     user_id: Annotated[UUID, Cookie()] = ...,
 ):
     params = _validate_profile(
         monthly_investment, annual_income, stock_pct, enterprising_pct, is_married,
         home_state, is_employed, has_401k, has_401k_match, match_rate_pct,
-        match_limit_pct, k401_investment_types, filing_status,
+        match_limit_pct, k401_investment_types, filing_status, date_of_birth,
     )
     params["user_id"] = user_id
 
@@ -402,12 +412,13 @@ def create_user_profile(
                     INSERT INTO user_profile (
                         user_id, monthly_investment, annual_income, stock_pct, enterprising_pct,
                         is_married, home_state, is_employed, has_401k, has_401k_match,
-                        match_rate_pct, match_limit_pct, k401_investment_types, filing_status
+                        match_rate_pct, match_limit_pct, k401_investment_types, filing_status,
+                        date_of_birth
                     ) VALUES (
                         :user_id, :monthly_investment, :annual_income, :stock_pct, :enterprising_pct,
                         :is_married, :home_state, :is_employed, :has_401k, :has_401k_match,
                         :match_rate_pct, :match_limit_pct, CAST(:k401_investment_types AS jsonb),
-                        :filing_status
+                        :filing_status, :date_of_birth
                     )
                     RETURNING {_PROFILE_COLUMNS}
                 """),
@@ -438,12 +449,13 @@ def update_user_profile(
     match_limit_pct: Annotated[float | None, Form()] = None,
     k401_investment_types: Annotated[list[str], Form()] = [],
     filing_status: Annotated[str | None, Form()] = None,
+    date_of_birth: Annotated[date | None, Form()] = None,
     user_id: Annotated[UUID, Cookie()] = ...,
 ):
     params = _validate_profile(
         monthly_investment, annual_income, stock_pct, enterprising_pct, is_married,
         home_state, is_employed, has_401k, has_401k_match, match_rate_pct,
-        match_limit_pct, k401_investment_types, filing_status,
+        match_limit_pct, k401_investment_types, filing_status, date_of_birth,
     )
     params["user_id"] = user_id
 
@@ -466,6 +478,7 @@ def update_user_profile(
                         match_limit_pct       = :match_limit_pct,
                         k401_investment_types = CAST(:k401_investment_types AS jsonb),
                         filing_status         = :filing_status,
+                        date_of_birth         = :date_of_birth,
                         updated_at            = NOW()
                     WHERE user_id = :user_id
                     RETURNING {_PROFILE_COLUMNS}
