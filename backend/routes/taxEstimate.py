@@ -18,6 +18,9 @@ from tax_calculator import (
     get_opening_carryover_balance,
     store_carryover_balance,
     get_current_price,
+    get_required_profile_columns,
+    get_live_account_balance,
+    compute_roth_401k_withdrawal,
 )
 
 router = APIRouter(prefix="/api/taxEstimate")
@@ -176,3 +179,75 @@ def estimateRetrieval(
         "carryover_to_next_year": carryover_result["carryover_to_next_year"],
         "breakdown": breakdown,
     }
+
+
+@router.get("/estimateRothWithdrawal")
+def estimateRothWithdrawal(
+    user_id: Annotated[UUID, Cookie()],
+    snapTrade_id: Annotated[str, Cookie(alias="snapTradeUserID")],
+    account_id: str,
+    withdrawal_amount: float,
+    total_contributions: float,
+    meets_five_year_rule: bool,
+):
+    if withdrawal_amount <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="withdrawal_amount must be positive")
+    if total_contributions < 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="total_contributions cannot be negative")
+
+    try:
+        snaptrade_usersecret_id = getSnapTradeSecretID(snapTrade_id)
+    except HTTPException:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid request: SnapTrade secret was not found for this user",
+        )
+    if not snaptrade_usersecret_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid request: SnapTrade secret was not found for this user",
+        )
+
+    profile_columns = get_required_profile_columns("roth_401k")
+
+    with SessionLocal() as session:
+        try:
+            assert_user_exists(session, user_id)
+            profile_row = session.execute(
+                text(f"SELECT {', '.join(profile_columns)} FROM user_profile WHERE user_id = :user_id"),
+                {"user_id": user_id},
+            ).first()
+        except HTTPException:
+            session.rollback()
+            raise
+        except Exception as exc:
+            session.rollback()
+            raise HTTPException(status_code=500, detail=f"Failed to load user profile: {exc}")
+
+    if profile_row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
+
+    profile = dict(zip(profile_columns, profile_row))
+    if profile["date_of_birth"] is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please add your date of birth to your profile before estimating a Roth 401(k) withdrawal",
+        )
+
+    live_balance = get_live_account_balance(snapTrade_id, snaptrade_usersecret_id, account_id)
+
+    tax_year = date.today().year
+
+    result = compute_roth_401k_withdrawal(
+        filing_status=profile["filing_status"],
+        annual_income=float(profile["annual_income"]),
+        home_state=profile["home_state"],
+        date_of_birth=profile["date_of_birth"],
+        withdrawal_amount=withdrawal_amount,
+        total_contributions=total_contributions,
+        live_balance=live_balance,
+        meets_five_year_rule=meets_five_year_rule,
+        tax_year=tax_year,
+    )
+
+    return result
