@@ -59,7 +59,16 @@ def assert_user_exists(session, user_id) -> None:
 
 def fetch_av(function: str, symbol: Optional[str] = None, **kwargs) -> dict:
     api_key_var = _next_lead_stock_api_key_var()
-    api_key = os.environ[api_key_var]
+    api_key = os.environ.get(api_key_var)
+    if not api_key:
+        # A raw KeyError here would crash past FastAPI's exception handling with no
+        # CORS headers on the resulting response -- the browser reports that as a bare
+        # "Failed to fetch" with no status code, indistinguishable from a real network
+        # failure. Surfacing it as a normal HTTPException instead makes a missing/
+        # unwired env var (e.g. not passed through in docker-compose.dev.yml) show up
+        # as a readable "Screen failed (500)" message client-side.
+        print(f"[AV CONFIG-ERR] function={function} symbol={symbol} missing_env_var={api_key_var}", flush=True)
+        raise HTTPException(status_code=500, detail=f"Server is missing the {api_key_var} API key")
     params = {"function": function, "apikey": api_key}
     if symbol:
         params["symbol"] = symbol
