@@ -19,7 +19,7 @@ rather than `stocks_total`, keeping the 50/50 stocks-to-bonds reading honest.
 from typing import Annotated, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Cookie
+from fastapi import APIRouter, Cookie, HTTPException, status
 from sqlalchemy import text
 
 from database import SessionLocal
@@ -28,6 +28,27 @@ from routes.stocks import resolve_symbols, _fetch_etf_sector_weights, _fetch_bon
 
 
 router = APIRouter(prefix="/api/portfolio")
+
+
+@router.get("/targetSplit")
+def target_split(user_id: Annotated[UUID, Cookie()]):
+    """
+        The user's goal stocks/bonds split, straight from user_profile.stock_pct
+        (bond_pct is never stored separately -- it's always 100 - stock_pct, same as
+        every other reader of this column). Powers the "Target Split ... reached / not
+        reached" message on the top-level Stocks vs Bonds pie tier.
+    """
+    with SessionLocal() as session:
+        row = session.execute(
+            text("SELECT stock_pct FROM user_profile WHERE user_id = :user_id"),
+            {"user_id": user_id},
+        ).first()
+
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
+
+    stock_pct = row[0]
+    return {"stock_pct": stock_pct, "bond_pct": 100 - stock_pct}
 
 
 def _safe_float(value, default: float = 0.0) -> float:
