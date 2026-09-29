@@ -264,8 +264,7 @@ export default function UserProfileForm({ initialProfile }: { initialProfile: Us
               value={homeState}
               onChange={(e) => setHomeState(e.target.value)}
               aria-label="Home state"
-              className="w-full bg-transparent outline-none text-sm"
-              style={{ colorScheme: "light", color: "#0c0a09" }}
+              className="w-full bg-transparent outline-none text-sm text-[var(--foreground)]"
             >
               <option value="" style={{ color: "#0c0a09", backgroundColor: "#ffffff" }}>
                 Select…
