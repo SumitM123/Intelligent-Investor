@@ -165,6 +165,14 @@ def estimateRetrieval(
 
     net_value = new_net_st + new_net_lt
 
+    # What slice of the net value the total tax actually represents -- e.g. a $230
+    # tax on a $1,000 net gain is "23% of your net value going to tax," which is a
+    # more legible signal than the raw dollar figures alone. None when net_value is
+    # 0 since there's no meaningful proportion to express against nothing.
+    tax_pct_of_net_value = (
+        (tax_result["total_tax"] / net_value) * 100 if net_value != 0 else None
+    )
+
     return {
         "net_value": net_value,
         "is_net_loss": net_value < 0,
@@ -174,6 +182,7 @@ def estimateRetrieval(
         "state_tax": tax_result["state_tax"],
         "niit": tax_result["niit"],
         "total_tax": tax_result["total_tax"],
+        "tax_pct_of_net_value": tax_pct_of_net_value,
         "tax_year": tax_year,
         "deductible_against_income_this_year": carryover_result["deductible_against_income_this_year"],
         "carryover_to_next_year": carryover_result["carryover_to_next_year"],
