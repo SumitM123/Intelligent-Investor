@@ -15,6 +15,7 @@ export interface SellEstimateNetLoss {
   is_net_loss: true;
   net_value: number;
   total_tax: number;
+  tax_pct_of_net_value: number | null;
   federal_tax: 0;
   state_tax: 0;
   deductible_against_income_this_year: number;
@@ -32,6 +33,7 @@ export interface SellEstimateSuccess {
   federal_tax: number;
   state_tax: number;
   total_tax: number;
+  tax_pct_of_net_value: number | null;
   niit: number;
   tax_year: number;
   breakdown: SellEstimateBreakdownEntry[];
