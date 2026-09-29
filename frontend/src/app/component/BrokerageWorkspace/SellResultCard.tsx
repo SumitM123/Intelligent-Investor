@@ -11,16 +11,23 @@ function formatCurrency(amount: number): string {
   return `${sign}$${Math.abs(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function formatPercent(value: number): string {
+  const sign = value < 0 ? "-" : "";
+  return `${sign}${Math.abs(value).toFixed(1)}%`;
+}
+
 function SummaryRow({
   label,
   value,
   tone = "neutral",
   emphasize = false,
+  format = "currency",
 }: {
   label: string;
   value: number;
   tone?: "neutral" | "pass" | "fail";
   emphasize?: boolean;
+  format?: "currency" | "percent";
 }) {
   const color =
     tone === "pass" ? "var(--pass)" : tone === "fail" ? "var(--fail)" : "var(--accent)";
@@ -31,7 +38,7 @@ function SummaryRow({
         className={`tabular ${emphasize ? "text-base font-semibold" : "text-sm font-medium"}`}
         style={{ color }}
       >
-        {formatCurrency(value)}
+        {format === "percent" ? formatPercent(value) : formatCurrency(value)}
       </span>
     </div>
   );
@@ -51,6 +58,13 @@ export default function SellResultCard({ result }: Props) {
         <SummaryRow label="Federal tax" value={result.federal_tax} />
         <SummaryRow label="State tax" value={result.state_tax} />
         <SummaryRow label="Total tax" value={result.total_tax} emphasize />
+        {result.tax_pct_of_net_value !== null && (
+          <SummaryRow
+            label="Tax as % of net value"
+            value={result.tax_pct_of_net_value}
+            format="percent"
+          />
+        )}
         {result.is_net_loss && (
           <>
             <SummaryRow
