@@ -175,7 +175,6 @@ export default function BrokerageWorkspace({ broker, isDefensive }: Props) {
         <SecurityList
           breakdown={breakdown}
           frame={currentFrame}
-          isDefensive={isDefensive}
           accountId={selectedAccountId}
         />
       </div>
