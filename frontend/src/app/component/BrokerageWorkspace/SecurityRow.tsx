@@ -1,12 +1,12 @@
 "use client";
 
-import { evaluate } from "./criteria";
+import { useEffect } from "react";
+import { useLeadingStockScreen } from "./useLeadingStockScreen";
 import SellPanel from "./SellPanel";
 import { isSellable, type SecurityRowData } from "./scope";
 
 interface Props {
   row: SecurityRowData;
-  isDefensive: boolean;
   shareOfTotal: number;
   mode: "view" | "sell";
   expanded: boolean;
@@ -17,7 +17,6 @@ interface Props {
 
 export default function SecurityRow({
   row,
-  isDefensive,
   shareOfTotal,
   mode,
   expanded,
@@ -25,9 +24,41 @@ export default function SecurityRow({
   sellFraction,
   onSellFractionChange,
 }: Props) {
-  const { verdict, results, exemptNote } = evaluate(row, isDefensive);
-  const passing = verdict === "pass";
+  const { status, verdict, results, exemptNote, error, run } = useLeadingStockScreen(row);
   const panelId = `criteria-${row.key}`;
+
+  // Fetch-on-demand: only once this row is actually opened in view mode, and only once
+  // per row (status flips off "idle" as soon as the fetch starts, so this won't refire
+  // on every expand/collapse — it fires again only via the panel's own Retry button).
+  useEffect(() => {
+    if (mode === "view" && expanded && status === "idle") run();
+  }, [mode, expanded, status, run]);
+
+  // Collapsed-row dot: distinct from a real pass/fail until a screen has actually run,
+  // so an equity nobody has clicked yet reads as "unknown," not the misleading default
+  // green the stub used to show for every single holding.
+  const dotColor =
+    status === "success"
+      ? verdict === "pass"
+        ? "var(--pass)"
+        : "var(--fail)"
+      : status === "exempt"
+        ? "var(--pass)"
+        : status === "error"
+          ? "var(--warn)"
+          : "var(--muted)";
+  const dotLabel =
+    status === "success"
+      ? verdict === "pass"
+        ? "Passes the leading-stock screen"
+        : "Fails the leading-stock screen"
+      : status === "exempt"
+        ? "Exempt from the checklist"
+        : status === "error"
+          ? "Screen failed"
+          : status === "loading"
+            ? "Checking…"
+            : "Not yet screened — click to check";
 
   const sellable = isSellable(row);
 
@@ -84,9 +115,9 @@ export default function SecurityRow({
             <span
               aria-hidden
               className="w-2 h-2 rounded-full shrink-0"
-              style={{ background: passing ? "var(--pass)" : "var(--fail)" }}
+              style={{ background: dotColor }}
             />
-            <span className="sr-only">{passing ? "Passes" : "Fails"}</span>
+            <span className="sr-only">{dotLabel}</span>
           </>
         )}
 
@@ -117,8 +148,23 @@ export default function SecurityRow({
 
       {expanded && mode === "view" && (
         <div id={panelId} className="px-3 pb-3 pt-1 bg-[var(--surface-muted)]">
-          {exemptNote ? (
+          {status === "exempt" ? (
             <p className="text-xs text-[var(--muted)] leading-relaxed px-1 py-2">{exemptNote}</p>
+          ) : status === "idle" || status === "loading" ? (
+            <p className="text-xs text-[var(--muted)] leading-relaxed px-1 py-2">
+              Checking against the 7-criterion leading-stock screen…
+            </p>
+          ) : status === "error" ? (
+            <div className="px-1 py-2">
+              <p className="text-xs text-[var(--warn)] leading-relaxed">{error}</p>
+              <button
+                type="button"
+                onClick={run}
+                className="mt-1.5 text-xs font-medium text-[var(--accent)] hover:underline"
+              >
+                Retry
+              </button>
+            </div>
           ) : (
             <ul className="space-y-0.5">
               {results.map(({ criterion, pass }) => (
