@@ -10,7 +10,6 @@ import type { Breakdown, Frame } from "../PortfolioBreakdown/types";
 interface Props {
   breakdown: Breakdown;
   frame: Frame;
-  isDefensive: boolean;
   accountId: string | null;
 }
 
@@ -22,7 +21,7 @@ const SCOPE_LABEL: Record<string, string> = {
   bonds: "The bonds half",
 };
 
-export default function SecurityList({ breakdown, frame, isDefensive, accountId }: Props) {
+export default function SecurityList({ breakdown, frame, accountId }: Props) {
   const [mode, setMode] = useState<Mode>("view");
   // Dual-purpose: the view-mode "which criteria panels are open" set doubles as the
   // sell-mode "which rows are selected" set, since selecting a row IS opening its panel.
@@ -164,7 +163,6 @@ export default function SecurityList({ breakdown, frame, isDefensive, accountId 
                   <SecurityRow
                     key={row.key}
                     row={row}
-                    isDefensive={isDefensive}
                     shareOfTotal={scopedTotal > 0 ? (row.value / scopedTotal) * 100 : 0}
                     mode={mode}
                     expanded={expanded.has(row.key)}
