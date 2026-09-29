@@ -4,7 +4,12 @@ import { useMemo } from "react";
 import PieView from "./PieView";
 import BondDetailCard from "./BondDetailCard";
 import { findBond, frameLabel, slicesFor, titleFor, unitFor } from "./derive";
+import { useTargetSplit } from "./useTargetSplit";
 import type { Breakdown, Frame } from "./types";
+
+// Reached = the account's current stock% sits within 1 point of the profile's goal
+// stock% (bond% moves in exact lockstep with stock%, so checking one side covers both).
+const TARGET_TOLERANCE_PCT = 1;
 
 interface Props {
   breakdown: Breakdown;
@@ -33,6 +38,7 @@ export default function PortfolioBreakdown({
   const current = stack[stack.length - 1];
   const slices = useMemo(() => slicesFor(current, breakdown, push), [current, breakdown, push]);
   const charted = breakdown.stocks_total + breakdown.bonds_total;
+  const { target } = useTargetSplit();
 
   return (
     <div>
@@ -109,6 +115,10 @@ export default function PortfolioBreakdown({
 
       <p className="text-sm font-semibold mb-3">{titleFor(current)}</p>
 
+      {current.level === "L0" && target && charted > 0 && (
+        <TargetSplitBanner target={target} currentStockPct={(breakdown.stocks_total / charted) * 100} />
+      )}
+
       {/* Body */}
       {current.level === "L3B" ? (
         (() => {
@@ -133,5 +143,24 @@ export default function PortfolioBreakdown({
         <PieView slices={slices} unit={unitFor(current)} />
       )}
     </div>
+  );
+}
+
+function TargetSplitBanner({
+  target,
+  currentStockPct,
+}: {
+  target: { stock_pct: number; bond_pct: number };
+  currentStockPct: number;
+}) {
+  const reached = Math.abs(currentStockPct - target.stock_pct) <= TARGET_TOLERANCE_PCT;
+  return (
+    <p
+      className="text-xs font-medium mb-3"
+      style={{ color: reached ? "var(--pass)" : "var(--fail)" }}
+    >
+      Target Split of {target.stock_pct}% stocks and {target.bond_pct}% bonds{" "}
+      {reached ? "reached" : "not reached"}
+    </p>
   );
 }
