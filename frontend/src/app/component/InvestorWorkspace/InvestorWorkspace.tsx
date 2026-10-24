@@ -2,7 +2,11 @@
 
 import { useCallback, useState } from "react";
 import StockSearchBar from "@/app/component/Stock Search Bar/StockSearchBar";
-import BondList, { type BondEntry } from "@/app/component/BondList/BondList";
+// FEATURE DISABLED: manual bond holdings. The BondList default export is commented
+// out in BondList.tsx, so only the BondEntry type is imported here. Restore the
+// line below (and the <BondList /> block further down) to re-enable the feature.
+// import BondList, { type BondEntry } from "@/app/component/BondList/BondList";
+import { type BondEntry } from "@/app/component/BondList/BondList";
 import { PortfolioProvider } from "@/app/component/PortfolioBreakdown/PortfolioProvider";
 import BrokerageWorkspace from "@/app/component/BrokerageWorkspace/BrokerageWorkspace";
 import { useBrokerageState } from "@/app/component/BrokerageWorkspace/useBrokerageState";
@@ -134,11 +138,14 @@ export default function InvestorWorkspace({ initialBonds, hasSnapTradeUser, isDe
 
           <BrokerageWorkspace broker={broker} isDefensive={isDefensive} />
 
+          {/* FEATURE DISABLED: manual bond holdings — the add form / lot table is not rendered. */}
+          {/*
           {analyzing && (
             <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
               <BondList isDefensive={isDefensive} />
             </div>
           )}
+          */}
         </div>
       </PortfolioProvider>
     </div>
