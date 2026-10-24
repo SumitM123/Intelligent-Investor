@@ -1,11 +1,12 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import create_engine, text
 import psycopg2
 import os
+import traceback
 from database import SessionLocal
 from routes.user import router as router_user
 from routes.stocks import router as router_stocks
@@ -41,6 +42,24 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Intelligent Investor", version="1.0.0", lifespan=lifespan)
+
+# Registered *before* the CORS middleware below, which puts it inside it: a 500 built
+# here still unwinds back out through CORSMiddleware and picks up its headers. Starlette's
+# own ServerErrorMiddleware sits outside CORS, so anything that escapes all the way to it
+# produces a header-less 500 that the browser rejects as a bare "Failed to fetch" with no
+# status -- which is what a missing env var used to look like client-side.
+@app.middleware("http")
+async def return_unhandled_errors_as_json(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as exc:
+        print(
+            f"[UNHANDLED] {request.method} {request.url.path} {type(exc).__name__}: {exc}",
+            flush=True,
+        )
+        traceback.print_exc()
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
 
 # Add CORS middleware to allow frontend to communicate with backend
 app.add_middleware(
