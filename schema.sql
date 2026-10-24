@@ -217,4 +217,40 @@ CREATE TABLE IF NOT EXISTS net_capital_loss (
     PRIMARY KEY (user_id, tax_year)
 );
 
+-- Account-level SnapTrade activity-history sync cursor for FIFO lot caching (the
+-- "Actual Retrieved" traditional_brokerage tax-estimate feature). One
+-- get_account_activities(type="BUY,SELL") fetch covers every symbol in the account,
+-- so the cursor is account-scoped, not symbol-scoped -- see fifo_lot_cache below for
+-- the per-symbol side. last_activity_index is a LOCATE HINT ONLY for the next sync's
+-- bidirectional search (see locate_cursor_activity in backend/tax_calculator.py) --
+-- never trusted as ground truth without a UUID-equality check against
+-- last_activity_id. last_seen_trade_date drives the narrowed-fetch start_date on
+-- subsequent syncs (see sync_fifo_cache_for_account). All three are NULL together
+-- until the first successful sync for an account.
+CREATE TABLE IF NOT EXISTS fifo_sync_cursor (
+    user_id               UUID     NOT NULL REFERENCES users_id(user_id) ON DELETE CASCADE,
+    account_id            TEXT     NOT NULL,
+    last_activity_id      UUID,
+    last_activity_index   INTEGER,
+    last_seen_trade_date  DATE,
+    last_synced_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, account_id)
+);
+
+-- Per-symbol cached FIFO lot queue (the real remaining lots making up current
+-- holdings -- same shape replay_fifo_lots has always returned transiently) for the
+-- "Actual Retrieved" tax-estimate feature. lots is a JSONB array of
+-- {shares: float, price: float, trade_date: "YYYY-MM-DD"}, oldest-first, matching
+-- deque order. NEVER mutated by consume_fifo_lots's hypothetical per-request sell
+-- estimate -- only real BUY/SELL activity, applied via
+-- apply_new_activities_to_cache, may write here.
+CREATE TABLE IF NOT EXISTS fifo_lot_cache (
+    user_id    UUID NOT NULL REFERENCES users_id(user_id) ON DELETE CASCADE,
+    account_id TEXT NOT NULL,
+    symbol     TEXT NOT NULL,
+    lots       JSONB NOT NULL DEFAULT '[]'::jsonb,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, account_id, symbol)
+);
+
 COMMIT;
