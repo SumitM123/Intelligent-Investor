@@ -1,5 +1,7 @@
+import bisect
+import json
 from collections import deque
-from datetime import date
+from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy import text
@@ -16,7 +18,10 @@ from snapTradeInitialization import snapTrade
       against PolicyEngine's own source to correctly apply IRC 1222(11) short/long-term
       netting, the IRC 1211(b) $3,000/$1,500 annual capital-loss cap, and NIIT's
       investment-income base, all automatically, from raw (possibly negative)
-      short_term_capital_gains/long_term_capital_gains inputs.
+      short_term_capital_gains/long_term_capital_gains inputs. FIFO lots are cached
+      per (user_id, account_id, symbol) in fifo_lot_cache rather than rebuilt from
+      scratch on every request -- see sync_fifo_cache_for_account, fifo_sync_cursor,
+      and the implementation plan for the full incremental-sync design.
     - roth_401k: a single withdrawal amount split proportionally into contribution/profit
       portions, taxed via compute_roth_401k_withdrawal (also policyengine-us-backed, via
       taxable_401k_distributions). No FIFO lots, no capital gains, no carryover.
@@ -126,14 +131,97 @@ def fetch_buy_sell_activities(
     return parsed
 
 
-def replay_fifo_lots(activities: list[dict]) -> list[dict]:
-    """Replay BUY/SELL activity history (oldest first) into the FIFO lots making up
-    current holdings. BUY pushes a lot to the back of the queue; SELL consumes the
-    oldest lot(s) first, reducing (never over-consuming) shares -- a lot can be
-    partially consumed if a sell is smaller than it."""
-    queue: deque[dict] = deque()
+def fetch_all_buy_sell_activities(
+    snapTrade_id: str,
+    snaptrade_usersecret_id: str,
+    account_id: str,
+    start_date,
+    end_date,
+) -> list[dict]:
+    """All BUY/SELL activities for an account -- every symbol, not just one -- oldest
+    first. Sibling of fetch_buy_sell_activities without the per-symbol filter, used by
+    the FIFO lot cache sync (sync_fifo_cache_for_account) so one fetch covers every
+    symbol instead of one fetch per symbol being sold (the inefficiency build_fifo_lots
+    has today: one full-account fetch per symbol in the route's sell loop).
 
+    Unlike fetch_buy_sell_activities, also captures each activity's `id` and `symbol`:
+    `id` is SnapTrade's transaction UUID (confirmed via live docs fetch this session --
+    "Unique identifier for the transaction... Please note that this ID *can* change if
+    the transaction is deleted and re-added" when SnapTrade reprocesses from the
+    brokerage, documented as rare), normalized to a lowercase string once here so every
+    later comparison (locate_cursor_activity) is a plain string equality, never a
+    per-comparison type coercion. `symbol` is needed to bucket the result by ticker
+    before applying to each symbol's cached queue."""
+    activities_response = snapTrade.account_information.get_account_activities(
+        account_id=account_id,
+        user_id=snapTrade_id,
+        user_secret=snaptrade_usersecret_id,
+        start_date=start_date,
+        end_date=end_date,
+        type="BUY,SELL",
+        limit=1000,
+    )
+    activities_body = activities_response.body or {}
+    activities = activities_body.get("data", []) if isinstance(activities_body, dict) else []
+
+    parsed: list[dict] = []
     for activity in activities:
+        activity_type = activity.get("type")
+        if activity_type not in ("BUY", "SELL"):
+            continue
+
+        activity_id = activity.get("id")
+        if not activity_id:
+            continue
+
+        activity_symbol = activity.get("symbol") or {}
+        ticker = (activity_symbol.get("symbol") or activity_symbol.get("raw_symbol") or "").upper()
+        if not ticker:
+            continue
+
+        trade_date_dt = _parse_snaptrade_datetime(activity.get("trade_date"))
+        if trade_date_dt is None:
+            continue
+
+        shares = activity.get("units")
+        price = activity.get("price")
+        if shares is None or price is None:
+            continue
+
+        try:
+            shares_f = float(shares)
+            price_f = float(price)
+        except (TypeError, ValueError):
+            continue
+
+        parsed.append({
+            "id": str(activity_id).lower(),
+            "symbol": ticker,
+            "type": activity_type,
+            "shares": shares_f,
+            "price": price_f,
+            "trade_date": trade_date_dt,
+        })
+
+    parsed.sort(key=lambda item: item["trade_date"])
+    return parsed
+
+
+def apply_new_activities_to_cache(existing_lots: list[dict], new_activities: list[dict]) -> list[dict]:
+    """Generalized FIFO replay: seeds the deque from existing_lots (already-cached real
+    holdings for one symbol, possibly []) instead of always starting empty, then applies
+    only new_activities (oldest first, one symbol, REAL BUY/SELL only -- never a
+    hypothetical consume_fifo_lots-style sell, which must never be allowed to deplete the
+    persisted cache) on top. BUY pushes a lot to the back of the queue; SELL consumes the
+    oldest lot(s) first, partially draining a lot if the sell is smaller than it --
+    identical mechanics to the original replay_fifo_lots, which is now just this function
+    called with an empty seed (see below)."""
+    queue: deque[dict] = deque(
+        {"shares": lot["shares"], "price": lot["price"], "trade_date": lot["trade_date"]}
+        for lot in existing_lots
+    )
+
+    for activity in new_activities:
         if activity["type"] == "BUY":
             queue.append({
                 "shares": activity["shares"],
@@ -152,6 +240,16 @@ def replay_fifo_lots(activities: list[dict]) -> list[dict]:
                     remaining_to_sell = 0
 
     return list(queue)
+
+
+def replay_fifo_lots(activities: list[dict]) -> list[dict]:
+    """Replay BUY/SELL activity history (oldest first) into the FIFO lots making up
+    current holdings, from scratch. Now a thin wrapper around
+    apply_new_activities_to_cache so there is exactly one copy of this logic -- two
+    independently-maintained copies would risk drifting apart in tax-critical code.
+    Used by build_fifo_lots (the always-available non-cached reference path, unchanged)
+    and by a full FIFO cache resync (sync_fifo_cache_for_account)."""
+    return apply_new_activities_to_cache([], activities)
 
 
 def build_fifo_lots(
@@ -215,6 +313,309 @@ def consume_fifo_lots(remaining_lots: list[dict], shares_to_sell: float, current
         "long_term_gain": long_term_gain,
         "lots_consumed": lots_consumed,
     }
+
+
+def locate_cursor_activity(
+    activities: list[dict],
+    cursor_id: str,
+    hint_index: int,
+    max_probe: int = 200,
+) -> int | None:
+    """Find the index of the activity whose `id` matches cursor_id (already a
+    normalized lowercase string -- see fetch_all_buy_sell_activities), searching
+    outward from hint_index in both directions (hint, hint+1, hint-1, hint+2,
+    hint-2, ...) up to max_probe steps each way.
+
+    Bidirectional, not backward-only: the right starting position can drift in
+    EITHER direction between syncs -- left when old activity ages out of a lookback
+    window, right when a late-reported/backdated transaction (trade_date in the
+    past, only now visible -- evidenced structurally by trade_date and
+    settlement_date being separate fields on every activity) gets inserted earlier
+    in the re-sorted list than expected. Confirmed necessary this session, not a
+    hypothetical.
+
+    Never trusts the index alone -- every candidate position's `id` is compared by
+    value before being accepted as a match. Returns None if not found within bound,
+    or if the list doesn't contain it at all -- callers MUST treat None as "try a
+    wider fetch, then a full resync," never as "assume the index is still right."
+    """
+    n = len(activities)
+    if n == 0:
+        return None
+
+    hint_index = max(0, min(hint_index, n - 1))
+    if activities[hint_index]["id"] == cursor_id:
+        return hint_index
+
+    for delta in range(1, max_probe + 1):
+        right = hint_index + delta
+        if right < n and activities[right]["id"] == cursor_id:
+            return right
+        left = hint_index - delta
+        if left >= 0 and activities[left]["id"] == cursor_id:
+            return left
+        if right >= n and left < 0:
+            break  # exhausted the whole list before reaching max_probe
+
+    return None
+
+
+def _bisect_trade_date_hint(activities: list[dict], target_date: date) -> int:
+    """A starting index for locate_cursor_activity's outward search, computed fresh
+    from trade_date proximity via binary search rather than reused from a stored
+    index. A raw integer index from a PREVIOUS sync's fetch isn't meaningfully
+    comparable to a position in THIS sync's freshly fetched list -- the two fetches
+    cover different (and differently-sized) windows once the fetch is narrowed to
+    last_seen_trade_date, so the index stored on fifo_sync_cursor is kept only as
+    observability metadata, not reused as next time's literal hint. activities is
+    oldest-first and sorted by trade_date, so bisecting for target_date gives an
+    O(log n) starting point; locate_cursor_activity's outward UUID-equality search
+    then resolves same-day ties and any small misordering from exactly that point."""
+    if not activities:
+        return 0
+    target_dt = datetime.combine(target_date, time.min, tzinfo=timezone.utc)
+    dates = [a["trade_date"] for a in activities]
+    idx = bisect.bisect_left(dates, target_dt)
+    return max(0, min(idx, len(activities) - 1))
+
+
+def _serialize_lots(lots: list[dict]) -> list[dict]:
+    """Python lots (trade_date as a datetime) -> JSONB-safe dicts (trade_date as a
+    plain "YYYY-MM-DD" ISO date string). Time-of-day is deliberately discarded --
+    consume_fifo_lots only ever reads lot["trade_date"].date(), so it was never
+    meaningful. Mirrors this codebase's existing JSONB convention (e.g.
+    k401_investment_types in routes/user.py): json.dumps the result, bind it as a
+    string param, CAST(:param AS jsonb) in the SQL."""
+    return [
+        {
+            "shares": lot["shares"],
+            "price": lot["price"],
+            "trade_date": (
+                lot["trade_date"].date().isoformat()
+                if hasattr(lot["trade_date"], "date")
+                else lot["trade_date"].isoformat()
+            ),
+        }
+        for lot in lots
+    ]
+
+
+def _deserialize_lots(raw_lots) -> list[dict]:
+    """JSONB-safe dicts (as already-parsed Python objects -- psycopg2 decodes JSONB
+    columns automatically, same as bonds_table.bonds elsewhere in this codebase) ->
+    Python lots, upconverting trade_date from an ISO date string back to a
+    UTC-midnight datetime so consume_fifo_lots's existing lot["trade_date"].date()
+    call keeps working unmodified regardless of whether a lot originated from the
+    cache or a fresh SnapTrade fetch -- consume_fifo_lots itself is never touched."""
+    if not raw_lots:
+        return []
+    return [
+        {
+            "shares": float(lot["shares"]),
+            "price": float(lot["price"]),
+            "trade_date": datetime.combine(
+                date.fromisoformat(lot["trade_date"]), time.min, tzinfo=timezone.utc,
+            ),
+        }
+        for lot in raw_lots
+    ]
+
+
+def sync_fifo_cache_for_account(
+    session,
+    user_id,
+    account_id: str,
+    snapTrade_id: str,
+    snaptrade_usersecret_id: str,
+    today: date,
+    symbols_of_interest: set[str],
+) -> dict[str, list[dict]]:
+    """Orchestrates the per-account FIFO lot cache: locates the SnapTrade activity
+    cursor left by the last sync, applies only activity new since then to the cached
+    per-symbol queues, and persists the result -- replacing a full lookback-window
+    refetch+replay on every call (today's build_fifo_lots, called once per symbol)
+    with a small delta fetch, once per account, on steady-state calls.
+
+    Concurrency: locks the account's fifo_sync_cursor row (SELECT ... FOR UPDATE) for
+    the whole operation, via an upsert-then-lock pattern so the row always exists to
+    lock even on an account that has never synced before. This holds the lock across
+    the SnapTrade network call -- accepted given low expected per-account concurrency
+    (one user, rarely simultaneous tabs); a future change moving the fetch outside the
+    lock must re-validate the cursor hasn't moved after re-acquiring it.
+
+    Never writes anything consume_fifo_lots's hypothetical sell path produced -- only
+    real BUY/SELL activity (via apply_new_activities_to_cache) is ever persisted here.
+
+    Does not commit the session -- the caller (estimateRetrieval) owns the transaction
+    boundary, same convention as every other session-taking function in this file.
+
+    Returns a dict guaranteed to contain every symbol in symbols_of_interest
+    (defaulting to [] for a symbol the account has never held), plus any other symbol
+    this sync touched.
+    """
+    from frequenty_used_methods import fifo_lookback_start_date, FIFO_SYNC_OVERLAP_DAYS
+
+    # Upsert-then-lock: guarantees a row exists to lock even for an account that has
+    # never synced before, closing a race where two concurrent first-syncs could both
+    # proceed past a "no row found" SELECT ... FOR UPDATE.
+    session.execute(
+        text(
+            """
+            INSERT INTO fifo_sync_cursor (user_id, account_id)
+            VALUES (:user_id, :account_id)
+            ON CONFLICT (user_id, account_id) DO NOTHING
+            """
+        ),
+        {"user_id": user_id, "account_id": account_id},
+    )
+    cursor_row = session.execute(
+        text(
+            """
+            SELECT last_activity_id, last_seen_trade_date
+            FROM fifo_sync_cursor
+            WHERE user_id = :user_id AND account_id = :account_id
+            FOR UPDATE
+            """
+        ),
+        {"user_id": user_id, "account_id": account_id},
+    ).first()
+
+    stored_cursor_id = str(cursor_row[0]).lower() if cursor_row[0] is not None else None
+    last_seen_trade_date = cursor_row[1]
+
+    activities: list[dict] = []
+    new_activities_by_symbol: dict[str, list[dict]] = {}
+    did_resync = False
+
+    if stored_cursor_id is not None:
+        # Narrowed fetch first -- the actual lever that cuts SnapTrade load. The
+        # cursor's own trade_date is last_seen_trade_date, so it should sit very
+        # close to the end of this narrow, oldest-first-sorted window.
+        narrow_start = last_seen_trade_date - timedelta(days=FIFO_SYNC_OVERLAP_DAYS)
+        narrow_activities = fetch_all_buy_sell_activities(
+            snapTrade_id, snaptrade_usersecret_id, account_id,
+            start_date=narrow_start, end_date=today,
+        )
+        hint_index = _bisect_trade_date_hint(narrow_activities, last_seen_trade_date)
+        cursor_index = locate_cursor_activity(narrow_activities, stored_cursor_id, hint_index)
+
+        if cursor_index is not None:
+            activities = narrow_activities
+        else:
+            # Not found in the narrow window -- likely just means this account
+            # hasn't synced in more than the overlap buffer, not that the cache is
+            # actually invalid. Retry wide before concluding a resync is needed, or
+            # every >FIFO_SYNC_OVERLAP_DAYS-stale sync would wastefully discard a
+            # perfectly good cache.
+            wide_activities = fetch_all_buy_sell_activities(
+                snapTrade_id, snaptrade_usersecret_id, account_id,
+                start_date=fifo_lookback_start_date(), end_date=today,
+            )
+            hint_index = _bisect_trade_date_hint(wide_activities, last_seen_trade_date)
+            cursor_index = locate_cursor_activity(wide_activities, stored_cursor_id, hint_index)
+            activities = wide_activities
+
+        if cursor_index is None:
+            # Not found even in the full lookback window -- genuinely stale (aged
+            # out of the window entirely) or corrupted (SnapTrade's rare
+            # reprocessing event reissued the id). Fall through to full resync.
+            did_resync = True
+        else:
+            for activity in activities[cursor_index + 1:]:
+                new_activities_by_symbol.setdefault(activity["symbol"], []).append(activity)
+    else:
+        did_resync = True
+
+    if did_resync:
+        activities = fetch_all_buy_sell_activities(
+            snapTrade_id, snaptrade_usersecret_id, account_id,
+            start_date=fifo_lookback_start_date(), end_date=today,
+        )
+        new_activities_by_symbol = {}
+        for activity in activities:
+            new_activities_by_symbol.setdefault(activity["symbol"], []).append(activity)
+
+    existing_rows = session.execute(
+        text(
+            """
+            SELECT symbol, lots FROM fifo_lot_cache
+            WHERE user_id = :user_id AND account_id = :account_id
+            """
+        ),
+        {"user_id": user_id, "account_id": account_id},
+    ).fetchall()
+    existing_lots_by_symbol: dict[str, list[dict]] = {
+        row[0]: _deserialize_lots(row[1] or []) for row in existing_rows
+    }
+
+    # Which symbols actually need a DB write this sync. Incremental: only symbols
+    # with genuinely new activity. Resync: that, PLUS every symbol with a
+    # pre-existing cache row -- even one with zero activity in the fresh fetch --
+    # so a resync correctly overwrites (to []) a symbol whose activity disappeared
+    # from SnapTrade's history rather than silently leaving a stale row behind.
+    db_writes_needed = set(new_activities_by_symbol.keys())
+    if did_resync:
+        db_writes_needed |= set(existing_lots_by_symbol.keys())
+
+    result_lots_by_symbol: dict[str, list[dict]] = dict(existing_lots_by_symbol)
+
+    for sym in db_writes_needed:
+        if did_resync:
+            updated = apply_new_activities_to_cache([], new_activities_by_symbol.get(sym, []))
+        else:
+            updated = apply_new_activities_to_cache(
+                existing_lots_by_symbol.get(sym, []), new_activities_by_symbol[sym],
+            )
+        result_lots_by_symbol[sym] = updated
+
+        session.execute(
+            text(
+                """
+                INSERT INTO fifo_lot_cache (user_id, account_id, symbol, lots, updated_at)
+                VALUES (:user_id, :account_id, :symbol, CAST(:lots AS jsonb), NOW())
+                ON CONFLICT (user_id, account_id, symbol) DO UPDATE
+                    SET lots = EXCLUDED.lots, updated_at = NOW()
+                """
+            ),
+            {
+                "user_id": user_id,
+                "account_id": account_id,
+                "symbol": sym,
+                "lots": json.dumps(_serialize_lots(updated)),
+            },
+        )
+
+    if activities:
+        newest = activities[-1]
+        session.execute(
+            text(
+                """
+                UPDATE fifo_sync_cursor
+                SET last_activity_id = CAST(:activity_id AS uuid),
+                    last_activity_index = :activity_index,
+                    last_seen_trade_date = :trade_date,
+                    last_synced_at = NOW()
+                WHERE user_id = :user_id AND account_id = :account_id
+                """
+            ),
+            {
+                "user_id": user_id,
+                "account_id": account_id,
+                "activity_id": newest["id"],
+                "activity_index": len(activities) - 1,
+                "trade_date": newest["trade_date"].date(),
+            },
+        )
+    # else: zero BUY/SELL activity ever for this account -- leave the cursor at
+    # (NULL, NULL, NULL). The next sync will trivially take the full-resync path
+    # again, which is cheap when there's nothing to fetch. Not special-cased
+    # further -- a known, acceptable minor inefficiency for an account with no
+    # trade history at all.
+
+    for sym in symbols_of_interest:
+        result_lots_by_symbol.setdefault(sym, [])
+
+    return result_lots_by_symbol
 
 
 # This app's user_profile.filing_status values (lowercase_with_underscores, enforced by
