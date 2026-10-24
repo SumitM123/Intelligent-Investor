@@ -9,10 +9,10 @@ import re
 
 from database import SessionLocal
 from sqlalchemy import text
-from frequenty_used_methods import assert_user_exists, getSnapTradeSecretID, fifo_lookback_start_date
+from frequenty_used_methods import assert_user_exists, getSnapTradeSecretID
 from tax_calculator import (
     ACCOUNT_TYPE_TAX_REQUIREMENTS,
-    build_fifo_lots,
+    sync_fifo_cache_for_account,
     consume_fifo_lots,
     compute_policyengine_tax,
     get_opening_carryover_balance,
@@ -108,7 +108,26 @@ def estimateRetrieval(
     annual_income = float(annual_income)
 
     today = date.today()
-    account_created_date = fifo_lookback_start_date()
+
+    # One account-level sync call, not one full-history fetch per symbol -- see
+    # sync_fifo_cache_for_account for the incremental-cache design. Its own
+    # SessionLocal block, separate from the profile read above and the carryover/tax
+    # write below, since a failed cache sync shouldn't roll back the unrelated
+    # profile read, and vice versa.
+    with SessionLocal() as sync_session:
+        try:
+            lots_by_symbol = sync_fifo_cache_for_account(
+                sync_session, user_id, account_id,
+                snapTrade_id, snaptrade_usersecret_id, today,
+                symbols_of_interest=set(requested.keys()),
+            )
+            sync_session.commit()
+        except HTTPException:
+            sync_session.rollback()
+            raise
+        except Exception as exc:
+            sync_session.rollback()
+            raise HTTPException(status_code=500, detail=f"Failed to sync FIFO lot cache: {exc}")
 
     short_term_total = 0.0
     long_term_total = 0.0
@@ -116,10 +135,7 @@ def estimateRetrieval(
     price_by_symbol: dict[str, float] = {}
 
     for sym, shares_to_sell in requested.items():
-        lots = build_fifo_lots(
-            snapTrade_id, snaptrade_usersecret_id, account_id, sym,
-            account_created_date, today,
-        )
+        lots = lots_by_symbol[sym]
         if sym not in price_by_symbol:
             price_by_symbol[sym] = get_current_price(sym)
         current_price = price_by_symbol[sym]
