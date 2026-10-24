@@ -7,7 +7,7 @@ from fastapi import Response, status
 import uuid 
 from uuid import UUID
 from fastapi import Cookie
-from typing import Annotated
+from typing import Annotated, Optional
 from database import SessionLocal
 from sqlalchemy import text
 from frequenty_used_methods import getSnapTradeSecretID
@@ -15,7 +15,7 @@ from datetime import datetime, timezone, timedelta, date
 from zoneinfo import ZoneInfo
 import re
 import json
-from frequenty_used_methods import fetch_av, get_eps_and_pe
+from frequenty_used_methods import fetch_av, fetch_fmp, get_eps_and_pe
 
 router = APIRouter(prefix="/api/snapTrade")
 
@@ -957,17 +957,58 @@ def _safe_float(val, default=None):
         return default
 
 
-def _compute_price_dependent_criteria(symbol: str) -> dict:
-    # Recomputed every call (never cached): both metrics hinge on the
-    # current stock price, which is stale the moment we store it.
-    quote = fetch_av("GLOBAL_QUOTE", symbol).get("Global Quote", {})
-    current_price = _safe_float(quote.get("05. price"))
-    if current_price is None:
-        raise HTTPException(status_code=502, detail="Could not retrieve stock price from AlphaVantage")
+def _fetch_price_and_market_cap(symbol: str) -> tuple:
+    """Current price and market capitalisation, both from FMP's /profile.
 
-    overview = fetch_av("OVERVIEW", symbol)
-    market_cap = _safe_float(overview.get("MarketCapitalization"))
-    revenue_ttm = _safe_float(overview.get("RevenueTTM"))
+    Replaces AlphaVantage's OVERVIEW, which is premium-only as of 2026-10-13 (it
+    returns an "Information" body saying so, on every key). FMP is the better source
+    anyway: its marketCap tracks a fresher share count than price x AlphaVantage's
+    quarterly SHARES_OUTSTANDING figure (measured ~1.1% apart on IBM, with FMP the
+    more current), and it spends FMP's quota rather than AlphaVantage's much tighter
+    25-requests-per-day-per-key budget.
+
+    Fallback if FMP ever gates /profile the way AlphaVantage gated OVERVIEW: market cap
+    is price x shares, and AV's SHARES_OUTSTANDING (data[0].shares_outstanding_diluted)
+    is still free. Use diluted -- it is the conservative choice for a Graham screen.
+    """
+    profiles = fetch_fmp("profile", symbol=symbol)
+    entry = profiles[0] if isinstance(profiles, list) and profiles else {}
+    if not isinstance(entry, dict):
+        return None, None
+    return _safe_float(entry.get("price")), _safe_float(entry.get("marketCap"))
+
+
+def _revenue_ttm_from_quarters(income_statement: dict):
+    """Trailing-twelve-month revenue: the last four quarters of totalRevenue summed.
+
+    This is the same figure OVERVIEW.RevenueTTM carried, reconstructed one layer down --
+    verified to the cent against yfinance for IBM, AAPL, MSFT and NFLX. AlphaVantage
+    returns quarterlyReports newest-first, so [:4] is the trailing year.
+
+    Returns None rather than a short sum when a company has filed fewer than four
+    quarters: an understated revenue would inflate P/S and fail criterion 7 for the
+    wrong reason.
+    """
+    quarters = income_statement.get("quarterlyReports", [])[:4]
+    if len(quarters) < 4:
+        return None
+    values = [_safe_float(q.get("totalRevenue")) for q in quarters]
+    if any(v is None for v in values):
+        return None
+    return sum(values)
+
+
+def _compute_price_dependent_criteria(symbol: str, revenue_ttm: Optional[float] = None) -> dict:
+    # Recomputed every call (never cached): both ratios hinge on the market price,
+    # which moves daily.
+    current_price, market_cap = _fetch_price_and_market_cap(symbol)
+    if current_price is None:
+        raise HTTPException(status_code=502, detail="Could not retrieve stock price from FMP")
+
+    # Revenue only moves on a quarterly filing, so callers holding a cached figure pass
+    # it in and skip the call entirely; only a cache miss pays for INCOME_STATEMENT.
+    if revenue_ttm is None:
+        revenue_ttm = _revenue_ttm_from_quarters(fetch_av("INCOME_STATEMENT", symbol))
 
     cash_flow_reports = fetch_av("CASH_FLOW", symbol).get("annualReports", [])
     latest_cf = cash_flow_reports[0] if cash_flow_reports else {}
@@ -1073,7 +1114,15 @@ def isLeadingStock(
 
     if cached is not None:
         cached_criteria = cached[2] or {}
-        price_dep = _compute_price_dependent_criteria(normalized)
+        # adequate_size already persists revenue_ttm, so a cache hit needs no
+        # INCOME_STATEMENT call -- revenue only changes on a quarterly filing, and the
+        # cache is refreshed well inside that window.
+        cached_revenue_ttm = _safe_float(
+            (cached_criteria.get("adequate_size") or {}).get("revenue_ttm")
+        )
+        price_dep = _compute_price_dependent_criteria(
+            normalized, revenue_ttm=cached_revenue_ttm
+        )
         merged_criteria = {**cached_criteria, **price_dep}
         is_leading = all(
             merged_criteria.get(k, {}).get("pass", False)
@@ -1092,16 +1141,11 @@ def isLeadingStock(
 
     # --- Cache miss: fetch from AlphaVantage and evaluate all 7 criteria ---
 
-    # Current price
-    quote = fetch_av("GLOBAL_QUOTE", normalized).get("Global Quote", {})
-    current_price = _safe_float(quote.get("05. price"))
+    # Current price and market cap -- one FMP call covers both, replacing the former
+    # GLOBAL_QUOTE + OVERVIEW pair and freeing two AlphaVantage requests per screen.
+    current_price, market_cap = _fetch_price_and_market_cap(normalized)
     if current_price is None:
-        raise HTTPException(status_code=502, detail="Could not retrieve stock price from AlphaVantage")
-
-    # Company overview (market cap, trailing-12-month revenue)
-    overview = fetch_av("OVERVIEW", normalized)
-    market_cap = _safe_float(overview.get("MarketCapitalization"))
-    revenue_ttm = _safe_float(overview.get("RevenueTTM"))
+        raise HTTPException(status_code=502, detail="Could not retrieve stock price from FMP")
 
     # Balance sheet (most recent annual — current assets/liabilities for C2,
     # and last 10 years of shares outstanding for the C5 buybacks check).
@@ -1121,8 +1165,12 @@ def isLeadingStock(
             except ValueError:
                 pass
 
-    # Income statement (last 10 annual net incomes for the C4 deficit check)
-    annual_income = fetch_av("INCOME_STATEMENT", normalized).get("annualReports", [])[:10]
+    # Income statement: 10 annual net incomes for the C4 deficit check, plus the last
+    # four quarters of revenue for TTM. Both arrive in the same response, so replacing
+    # OVERVIEW's RevenueTTM costs no extra request here.
+    income_statement = fetch_av("INCOME_STATEMENT", normalized)
+    revenue_ttm = _revenue_ttm_from_quarters(income_statement)
+    annual_income = income_statement.get("annualReports", [])[:10]
     net_incomes = [_safe_float(r.get("netIncome")) for r in annual_income]
     net_incomes = [v for v in net_incomes if v is not None]
 
