@@ -84,15 +84,41 @@ def fetch_av(function: str, symbol: Optional[str] = None, **kwargs) -> dict:
     data = resp.json()
     if "Information" in data or "Note" in data:
         msg = data.get("Information") or data.get("Note")
-        print(f"[AV 429] function={function} symbol={symbol} body={msg}", flush=True)
-        raise HTTPException(status_code=429, detail=f"AlphaVantage rate limit reached: {msg}")
+        # AlphaVantage echoes the raw key back in the quota message ("We have detected
+        # your API key as ABC123..."), so scrub it before it reaches a log line or a
+        # client-facing error detail.
+        safe_msg = msg.replace(api_key, "<redacted>") if api_key else msg
+        # Throttling and permanent premium-endpoint refusals both arrive under
+        # "Information" and call for opposite responses -- a quota resets, a paywall
+        # never does. Match the paywall on its exact phrase: the daily-quota message
+        # also contains the word "premium" (it advertises the premium plans), so a
+        # looser test reports an exhausted key as a permanent paywall.
+        if "premium endpoint" in msg.lower():
+            print(f"[AV PREMIUM] function={function} symbol={symbol} body={safe_msg}", flush=True)
+            raise HTTPException(
+                status_code=502,
+                detail=f"AlphaVantage endpoint {function} is premium-only on this plan",
+            )
+        print(f"[AV 429] function={function} symbol={symbol} body={safe_msg}", flush=True)
+        raise HTTPException(
+            status_code=429, detail=f"AlphaVantage rate limit reached: {safe_msg}"
+        )
     if "Error Message" in data:
         raise HTTPException(status_code=502, detail=f"AlphaVantage error: {data['Error Message']}")
     return data
 
 
 def fetch_fmp(path: str, **params):
-    api_key = os.environ["FINANCIAL_MODELING_PREP_API"]
+    # Guarded the same way as fetch_av above, and for the same reason: a raw KeyError
+    # here escapes past the CORS middleware and reaches the browser as a bare
+    # "Failed to fetch" with no status code.
+    api_key = os.environ.get("FINANCIAL_MODELING_PREP_API")
+    if not api_key:
+        print(f"[FMP CONFIG-ERR] path={path} missing_env_var=FINANCIAL_MODELING_PREP_API", flush=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Server is missing the FINANCIAL_MODELING_PREP_API API key",
+        )
     query = {"apikey": api_key, **{k: v for k, v in params.items() if k != "apikey"}}
     url = f"{_FMP_BASE}/{path.lstrip('/')}"
 
@@ -121,7 +147,10 @@ def fetch_fmp(path: str, **params):
 
 
 def fetch_finnhub(endpoint: str, **params) -> dict:
-    api_key = os.environ["FINNHUB_API_KEY"]
+    api_key = os.environ.get("FINNHUB_API_KEY")
+    if not api_key:
+        print(f"[FINNHUB CONFIG-ERR] endpoint={endpoint} missing_env_var=FINNHUB_API_KEY", flush=True)
+        raise HTTPException(status_code=500, detail="Server is missing the FINNHUB_API_KEY API key")
     query = {**params, "token": api_key}
     url = f"{_FINNHUB_BASE}/{endpoint.lstrip('/')}"
 
@@ -171,6 +200,12 @@ def _parse_snaptrade_datetime(raw) -> Optional[datetime]:
 # replay. A fixed long lookback costs nothing extra (the brokerage just returns whatever
 # it actually retains) and can't under-fetch.
 ACTIVITY_LOOKBACK_DAYS = 3650
+
+# How far back of a safety overlap to re-fetch past the cached FIFO sync cursor's
+# last-seen trade date, to tolerate late-reported/backdated activity (settlement_date
+# vs trade_date gaps, SnapTrade processing lag) without missing it. See
+# sync_fifo_cache_for_account in tax_calculator.py.
+FIFO_SYNC_OVERLAP_DAYS = 14
 
 
 def fifo_lookback_start_date() -> date:
