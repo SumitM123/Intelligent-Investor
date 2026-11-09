@@ -274,13 +274,17 @@ def getAllAccountsFromConnection(
             continue
 
         # Trimmed to what the account picker actually renders, so the response shape is an
-        # explicit contract rather than whatever SnapTrade happens to return.
+        # explicit contract rather than whatever SnapTrade happens to return. raw_type is the
+        # brokerage's own account-type string (e.g. "ROTH_IRA", "INDIVIDUAL") -- unnormalized,
+        # no fixed enum across institutions, but it's the only signal available to classify an
+        # account for the Actual Retrieved feature (see accountKind.ts on the frontend).
         accountsForConnection.append({
             "id": brokerageAccount.get("id"),
             "name": brokerageAccount.get("name") or "Brokerage account",
             "number": brokerageAccount.get("number"),
             "institution_name": brokerageAccount.get("institution_name"),
             "balance": total.get("amount"),
+            "raw_type": brokerageAccount.get("raw_type"),
         })
 
     print(f"Accounts under connection {connection_id}: {len(accountsForConnection)}", flush=True)
