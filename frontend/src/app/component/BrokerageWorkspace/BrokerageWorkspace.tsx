@@ -176,6 +176,7 @@ export default function BrokerageWorkspace({ broker, isDefensive }: Props) {
           breakdown={breakdown}
           frame={currentFrame}
           accountId={selectedAccountId}
+          selectedAccount={selectedAccount}
         />
       </div>
     </>
