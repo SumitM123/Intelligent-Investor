@@ -3,14 +3,19 @@
 import { useEffect, useMemo, useState } from "react";
 import SecurityRow from "./SecurityRow";
 import SellResultCard from "./SellResultCard";
+import RothWithdrawalPanel from "./RothWithdrawalPanel";
+import RothWithdrawalResultCard from "./RothWithdrawalResultCard";
+import { classifyAccountKind } from "./accountKind";
 import { isSellable, scopeFor, securitiesFor, type SecurityRowData } from "./scope";
 import { useSellEstimate, type SellRequestEntry } from "./useSellEstimate";
-import type { Breakdown, Frame } from "../PortfolioBreakdown/types";
+import { useRothWithdrawalEstimate } from "./useRothWithdrawalEstimate";
+import type { AccountOption, Breakdown, Frame } from "../PortfolioBreakdown/types";
 
 interface Props {
   breakdown: Breakdown;
   frame: Frame;
   accountId: string | null;
+  selectedAccount: AccountOption | null;
 }
 
 type Mode = "view" | "sell" | "results";
@@ -21,7 +26,7 @@ const SCOPE_LABEL: Record<string, string> = {
   bonds: "The bonds half",
 };
 
-export default function SecurityList({ breakdown, frame, accountId }: Props) {
+export default function SecurityList({ breakdown, frame, accountId, selectedAccount }: Props) {
   const [mode, setMode] = useState<Mode>("view");
   // Dual-purpose: the view-mode "which criteria panels are open" set doubles as the
   // sell-mode "which rows are selected" set, since selecting a row IS opening its panel.
@@ -29,6 +34,18 @@ export default function SecurityList({ breakdown, frame, accountId }: Props) {
   const [sellFractions, setSellFractions] = useState<Record<string, number>>({});
   const { runEstimate, loading: estimateLoading, error: estimateError, result: estimateResult, reset: resetEstimate } =
     useSellEstimate();
+  const {
+    runEstimate: runRothEstimate,
+    loading: rothLoading,
+    error: rothError,
+    result: rothResult,
+    reset: resetRothEstimate,
+  } = useRothWithdrawalEstimate();
+
+  // Which Actual Retrieved UI applies to the selected account -- a plain brokerage
+  // account keeps the existing per-security sell flow; a Roth account swaps in an
+  // account-level withdrawal flow instead (see accountKind.ts).
+  const kind = classifyAccountKind(selectedAccount?.raw_type);
 
   const scope = scopeFor(frame);
   const groups = useMemo(() => securitiesFor(breakdown, scope), [breakdown, scope]);
@@ -70,6 +87,7 @@ export default function SecurityList({ breakdown, frame, accountId }: Props) {
     setExpanded(new Set());
     setSellFractions({});
     resetEstimate();
+    resetRothEstimate();
   };
 
   const handleSold = async () => {
@@ -79,6 +97,20 @@ export default function SecurityList({ breakdown, frame, accountId }: Props) {
       setMode("results");
     } catch {
       // estimateError is already set by the hook; stay in sell mode so the user can retry.
+    }
+  };
+
+  const handleRothSubmit = async (input: {
+    withdrawalAmount: number;
+    totalContributions: number;
+    meetsFiveYearRule: boolean;
+  }) => {
+    if (!accountId || rothLoading) return;
+    try {
+      await runRothEstimate({ accountId, ...input });
+      setMode("results");
+    } catch {
+      // rothError is already set by the hook; stay in sell mode so the user can retry.
     }
   };
 
@@ -104,20 +136,26 @@ export default function SecurityList({ breakdown, frame, accountId }: Props) {
           {mode === "view" && (
             <>
               <p className="text-xs text-[var(--muted)]">Click a row for its checklist</p>
-              {sellableRows.length > 0 && (
+              {(kind !== "traditional" || sellableRows.length > 0) && (
                 <button
                   type="button"
                   onClick={() => setMode("sell")}
                   className="px-3 py-1.5 rounded-lg border border-[var(--border)] text-xs font-medium hover:border-[var(--accent)] hover:text-[var(--accent)] transition"
                 >
-                  Sell
+                  {kind === "traditional" ? "Sell" : "Withdraw"}
                 </button>
               )}
             </>
           )}
           {mode === "sell" && (
             <>
-              <p className="text-xs text-[var(--muted)]">Click a row to select it for sale</p>
+              <p className="text-xs text-[var(--muted)]">
+                {kind === "traditional"
+                  ? "Click a row to select it for sale"
+                  : kind === "roth_401k"
+                    ? "Enter a withdrawal amount to estimate taxes and penalties"
+                    : "Roth IRA withdrawal estimates aren't supported yet"}
+              </p>
               <button
                 type="button"
                 onClick={resetToView}
@@ -140,13 +178,26 @@ export default function SecurityList({ breakdown, frame, accountId }: Props) {
       </div>
 
       {mode === "results" ? (
-        estimateResult ? (
+        kind === "roth_401k" && rothResult ? (
+          <RothWithdrawalResultCard result={rothResult} />
+        ) : estimateResult ? (
           <SellResultCard result={estimateResult} />
         ) : (
           <div className="rounded-lg border border-dashed border-[var(--border-strong)] bg-[var(--surface-muted)] p-6 text-center text-sm text-[var(--muted)]">
             Nothing to show.
           </div>
         )
+      ) : mode === "sell" && kind === "roth_401k" ? (
+        <RothWithdrawalPanel
+          accountBalance={selectedAccount?.balance ?? 0}
+          loading={rothLoading}
+          error={rothError}
+          onSubmit={handleRothSubmit}
+        />
+      ) : mode === "sell" && kind === "roth_ira" ? (
+        <div className="rounded-lg border border-dashed border-[var(--border-strong)] bg-[var(--surface-muted)] p-6 text-center text-sm text-[var(--muted)]">
+          Roth IRA withdrawal estimates aren&apos;t supported yet.
+        </div>
       ) : groups.length === 0 ? (
         <div className="rounded-lg border border-dashed border-[var(--border-strong)] bg-[var(--surface-muted)] p-6 text-center text-sm text-[var(--muted)]">
           Nothing in this part of the portfolio yet.
@@ -177,7 +228,7 @@ export default function SecurityList({ breakdown, frame, accountId }: Props) {
         </div>
       )}
 
-      {mode === "sell" && (
+      {mode === "sell" && kind === "traditional" && (
         <div className="mt-4 flex items-center justify-end gap-3">
           {estimateError && <p className="text-xs text-[var(--fail)]">{estimateError}</p>}
           <button
