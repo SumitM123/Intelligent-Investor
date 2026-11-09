@@ -16,6 +16,10 @@ export interface UserProfile {
   match_rate_pct: number | null;
   match_limit_pct: number | null;
   k401_investment_types: string[];
+  // ISO date string ("YYYY-MM-DD"), or null for existing profiles that predate this
+  // field. Nullable at the DB/route level too -- only Roth 401(k) withdrawal estimates
+  // actually require it, and that route 400s with a clear message if it's missing.
+  date_of_birth: string | null;
 }
 
 // Must stay in sync with _K401_TYPES in backend/routes/user.py.
@@ -66,6 +70,7 @@ export default function UserProfileForm({ initialProfile }: { initialProfile: Us
   );
   const [isMarried, setIsMarried] = useState<boolean | null>(initialProfile?.is_married ?? null);
   const [homeState, setHomeState] = useState(initialProfile?.home_state ?? "");
+  const [dateOfBirth, setDateOfBirth] = useState(initialProfile?.date_of_birth ?? "");
   const [isEmployed, setIsEmployed] = useState<boolean | null>(initialProfile?.is_employed ?? null);
   const [has401k, setHas401k] = useState<boolean | null>(initialProfile?.has_401k ?? null);
   const [hasMatch, setHasMatch] = useState<boolean | null>(initialProfile?.has_401k_match ?? null);
@@ -116,6 +121,9 @@ export default function UserProfileForm({ initialProfile }: { initialProfile: Us
     fd.append("enterprising_pct", String(enterprisingPct));
     fd.append("is_married", String(isMarried));
     fd.append("home_state", homeState);
+    // Nullable -- omit the key entirely when blank rather than sending an empty
+    // string, since the backend's `date | None` Form field 422s on "".
+    if (dateOfBirth !== "") fd.append("date_of_birth", dateOfBirth);
     fd.append("is_employed", String(isEmployed));
     // Walk the same conditional tree the form renders, so inactive keys are omitted
     // entirely. FastAPI 422s on an empty string for `bool | None`.
@@ -275,6 +283,16 @@ export default function UserProfileForm({ initialProfile }: { initialProfile: Us
                 </option>
               ))}
             </select>
+          </Field>
+          <Field label="Date of birth" hint="(for retirement-account age rules)">
+            <input
+              type="date"
+              value={dateOfBirth}
+              onChange={(e) => setDateOfBirth(e.target.value)}
+              max={new Date().toISOString().slice(0, 10)}
+              aria-label="Date of birth"
+              className="w-full bg-transparent outline-none text-sm tabular text-[var(--foreground)]"
+            />
           </Field>
         </div>
       </Section>
