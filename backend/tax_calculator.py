@@ -802,6 +802,11 @@ def compute_roth_401k_withdrawal(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Account has no positive balance to withdraw against",
         )
+    if withdrawal_amount > live_balance:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="withdrawal_amount cannot exceed the account's current balance",
+        )
 
     from dateutil.relativedelta import relativedelta
 
