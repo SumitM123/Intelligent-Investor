@@ -79,6 +79,10 @@ export interface AccountOption {
   // Only /api/snapTrade/list_accounts returns this; the per-connection route omits it
   // because every account it returns belongs to the connection that was asked for.
   connection_id?: string | null;
+  // The brokerage's own account-type string (e.g. "ROTH_IRA", "INDIVIDUAL") as passed
+  // through by SnapTrade -- unnormalized, no fixed enum across institutions. Feeds
+  // accountKind.ts's classifyAccountKind() to decide which Actual Retrieved UI to show.
+  raw_type?: string | null;
 }
 
 // One live brokerage connection, as reported by GET /api/snapTrade/connections.
